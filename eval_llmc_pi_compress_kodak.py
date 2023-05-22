@@ -65,7 +65,7 @@ def encode_rcc(model, clip, preprocess, im, N=5):
         num_inference_steps=num_inference_steps,
         height=im.shape[0],
         width=im.shape[1],
-        # negative_prompt='black and white',
+        negative_prompt='black and white',
         ).images
     dec_samples = np.stack([np.asarray(im) for im in images], axis=0)
     
@@ -101,7 +101,7 @@ def recon_rcc(model,  prompt, idx, N=5):
         num_inference_steps=num_inference_steps,
         height=im.shape[0],
         width=im.shape[1],
-        # negative_prompt='black and white',
+        negative_prompt='black and white',
         ).images
     dec_samples = np.stack([np.asarray(im) for im in images], axis=0)
 
