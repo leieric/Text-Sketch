@@ -13,13 +13,13 @@ from diffusers import DPMSolverMultistepScheduler, StableDiffusionPipeline
 import models_compressai
 import prompt_inversion.optim_utils as prompt_inv
 import prompt_inversion.open_clip as open_clip 
-
+import dataloaders
 from PIL import Image
 import torch
 from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode, to_pil_image, adjust_sharpness
 import yaml
-import argparse 
+from argparse import ArgumentParser, Namespace
 
 def recon(model, canny_map, prompt):
     dec = decode(model, canny_map, prompt, num_samples=2)
@@ -51,7 +51,7 @@ def encode_rcc(model, clip, preprocess, im, N=5):
     #     sketch_recon = ntc_sketch.decompress(sketch_dict['strings'], sketch_dict['shape'])['x_hat'][0]
     #     sketch_recon = adjust_sharpness(sketch_recon, 2)
     #     sketch_recon = HWC3((255*sketch_recon.permute(1,2,0)).numpy().astype(np.uint8))
-    caption = prompt_inv.optimize_prompt(clip, preprocess, args, 'cuda:0', target_images=[Image.fromarray(im)])
+    caption = prompt_inv.optimize_prompt(clip, preprocess, args_clip, 'cuda:0', target_images=[Image.fromarray(im)])
     # caption = caption_blip(blip, im)[0]
     
     guidance_scale = 9
@@ -142,8 +142,14 @@ def caption_blip(blip, im):
     return caption
 
 if __name__ == '__main__':
-    # print('hello')
-    dm = Kodak(root='/home/Shared/image_datasets/Kodak', batch_size=1)
+    parser = ArgumentParser()
+    parser.add_argument('--batch_size', default=1, type=int)
+    parser.add_argument('--N', default=1, type=int)
+    parser.add_argument('--dataset', default='Kodak', type=str)
+
+    args = parser.parse_args()
+    # dm = Kodak(root='~/data/Kodak', batch_size=1)
+    dm = dataloaders.get_dataloader(args)
 
     # apply_canny = HEDdetector()
     # apply_canny = HEDdetector
@@ -172,15 +178,16 @@ if __name__ == '__main__':
         revision="fp16",
         )
     model = model.to('cuda:0')
+    model.enable_xformers_memory_efficient_attention()
 
     # Make savedir
-    save_dir = f'recon_examples/SD_pi/kodak_recon'
+    save_dir = f'recon_examples/SD_pi/{args.dataset}_recon'
     pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
 
     # Load CLIP
-    args = argparse.Namespace()
-    args.__dict__.update(prompt_inv.read_json("prompt_inversion/sample_config.json"))
-    clip, _, clip_preprocess = open_clip.create_model_and_transforms(args.clip_model, pretrained=args.clip_pretrain, device='cuda:0')
+    args_clip = Namespace()
+    args_clip.__dict__.update(prompt_inv.read_json("prompt_inversion/sample_config.json"))
+    clip, _, clip_preprocess = open_clip.create_model_and_transforms(args_clip.clip_model, pretrained=args_clip.clip_pretrain, device='cuda:0')
 
     # from argparse import Namespace
     # import json
@@ -200,8 +207,8 @@ if __name__ == '__main__':
         x_im = (255*x.permute(1,2,0)).numpy().astype(np.uint8)
         im = resize_image(HWC3(x_im), 512)
         
-        caption, idx = encode_rcc(model, clip, clip_preprocess, im, 4)
-        xhat = recon_rcc(model, caption, idx,  4)
+        caption, idx = encode_rcc(model, clip, clip_preprocess, im, args.N)
+        xhat = recon_rcc(model, caption, idx,  args.N)
 
         im_orig = Image.fromarray(im)
         im_orig.save(f'{save_dir}/{i}_gt.png')

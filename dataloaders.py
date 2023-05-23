@@ -4,6 +4,16 @@ from torchvision.datasets import ImageFolder
 from torchvision import transforms
 from pytorch_lightning import LightningDataModule
 from torchvision.transforms import ToTensor
+import sys
+
+def get_dataloader(args):
+    if args.dataset == 'CLIC':
+        return CLIC(root='~/data/CLIC/2021', batch_size=args.batch_size)
+    elif args.dataset == 'Kodak':
+        return Kodak(root='~/data/Kodak', batch_size=args.batch_size)
+    else:
+        print("Invalid dataset")
+        sys.exit(0)
 
 class CLIC(LightningDataModule):
     def __init__(self, root, batch_size):
