@@ -227,7 +227,7 @@ if __name__ == '__main__':
         # im_recon = Image.fromarray(xhat)
         # im_recon.save(f'{save_dir}/{i}_recon.png')
 
-        im_sketch = Image.fromarray(sketch)
+        # im_sketch = Image.fromarray(sketch)
         im_sketch = to_pil_image(sketch[0])
         im_sketch.save(f'{save_dir}/{i}_sketch.png')
 
