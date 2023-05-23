@@ -8,3 +8,6 @@ I have several scripts so far. Each one will loop through a dataset (either [CLI
 
 The other eval_llmc files are intermediate test versions I used.
 
+Make sure you use CUDA_VISIBLE_DEVICES=i before calling python in the command line to run on gpu i.
+Also, I would recommend you to install the conda environment from [ControlNet](https://github.com/lllyasviel/ControlNet) via their environment.yaml file.
+
