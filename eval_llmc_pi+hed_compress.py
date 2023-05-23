@@ -17,8 +17,11 @@ import torch
 from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode, to_pil_image, adjust_sharpness
 import yaml
+import sys, zlib
 from argparse import ArgumentParser, Namespace
 
+prompt_pos = 'high quality'
+prompt_neg = 'disfigured, deformed, low quality, lowres, b&w, blurry, Photoshop, video game, bad art'
 
 def encode_rcc(model, clip, preprocess, ntc_sketch, im, N=5):
     """
@@ -53,15 +56,15 @@ def encode_rcc(model, clip, preprocess, ntc_sketch, im, N=5):
     num_inference_steps = 25
 
     images = model(
-        caption,
+        f'{caption}, {prompt_pos}',
         Image.fromarray(sketch_recon),
         generator = [torch.Generator(device="cuda").manual_seed(i) for i in range(N)],
         num_images_per_prompt=N,
-        # guidance_scale=guidance_scale,
+        guidance_scale=guidance_scale,
         num_inference_steps=num_inference_steps,
         height=im.shape[0],
         width=im.shape[1],
-        # negative_prompt='black and white',
+        negative_prompt=prompt_neg,
         ).images
     dec_samples = np.stack([np.asarray(im) for im in images], axis=0)
     
@@ -90,15 +93,15 @@ def recon_rcc(model,  ntc_sketch, caption, sketch_dict, idx, N=5):
     num_inference_steps = 25
 
     images = model(
-        caption,
+        f'{caption}, {prompt_pos}',
         Image.fromarray(sketch),
         generator = [torch.Generator(device="cuda").manual_seed(i) for i in range(N)],
         num_images_per_prompt=N,
-        # guidance_scale=guidance_scale,
+        guidance_scale=guidance_scale,
         num_inference_steps=num_inference_steps,
         height=im.shape[0],
         width=im.shape[1],
-        # negative_prompt='black and white',
+        negative_prompt=prompt_neg,
         ).images
     dec_samples = np.stack([np.asarray(im) for im in images], axis=0)
 
@@ -146,18 +149,6 @@ if __name__ == '__main__':
     # dm = Kodak(root='~/data/Kodak', batch_size=1)
     dm = dataloaders.get_dataloader(args)
 
-    # apply_canny = HEDdetector()
-    # apply_canny = HEDdetector
-
-    # # Load ControlNet
-    # control_name = 'control_v11p_sd21_hed'
-    # # control_yaml = f'./models/{control_name}.yaml'
-    # control_yaml = 'cldm_v21.yaml'
-    # control_model = f'./models/{control_name}.ckpt'
-    # model = create_model(f'./models/{control_yaml}').cpu()
-    # # model.load_state_dict(load_state_dict('./models/v1-5-pruned.ckpt', location='cuda'), strict=False)
-    # model.load_state_dict(load_state_dict(control_model, location='cuda'), strict=False)
-    # model = model.cuda()
     sd_model_id = "stabilityai/stable-diffusion-2-1-base"
     # controlnet = ControlNetModel.from_pretrained("lllyasviel/sd-controlnet-hed", torch_dtype=torch.float16)
     controlnet = ControlNetModel.from_pretrained("thibaud/controlnet-sd21-hed-diffusers", torch_dtype=torch.float16)
@@ -167,23 +158,7 @@ if __name__ == '__main__':
     model.scheduler = UniPCMultistepScheduler.from_config(model.scheduler.config)
     model.enable_xformers_memory_efficient_attention()
     model.enable_model_cpu_offload()
-
-
-    # load SD
     
-
-    # model_id = "stabilityai/stable-diffusion-2-1-base"
-    # scheduler = DPMSolverMultistepScheduler.from_pretrained(model_id, subfolder="scheduler")
-
-    # model = StableDiffusionPipeline.from_pretrained(
-    #     model_id,
-    #     scheduler=scheduler,
-    #     torch_dtype=torch.float16,
-    #     revision="fp16",
-    #     )
-    # model = model.to('cuda:0')
-    # model.enable_xformers_memory_efficient_attention()
-
     # Make savedir
     save_dir = f'recon_examples/SD_pi+hed/{args.dataset}_recon'
     pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
@@ -207,31 +182,42 @@ if __name__ == '__main__':
     ntc_sketch.update()
 
     for i, x in tqdm.tqdm(enumerate(dm.test_dset)):
+        # Resize to 512
         x = x[0]
         x_im = (255*x.permute(1,2,0)).numpy().astype(np.uint8)
         im = resize_image(HWC3(x_im), 512)
         
+        # Encode and decode
         caption, sketch, sketch_dict, idx = encode_rcc(model, clip, clip_preprocess, ntc_sketch, im, args.N)
         xhat, sketch_recon = recon_rcc(model, ntc_sketch, caption, sketch_dict, idx,  args.N)
 
+        # Save ground-truth image
         im_orig = Image.fromarray(im)
         im_orig.save(f'{save_dir}/{i}_gt.png')
 
+        # Save reconstructions
         for j, im_recon in enumerate(xhat):
             im_recon.save(f'{save_dir}/{i}_recon_{j}.png')
         # im_recon = Image.fromarray(xhat)
         # im_recon.save(f'{save_dir}/{i}_recon.png')
 
-        # im_sketch = Image.fromarray(sketch)
+        # Save sketch images
         im_sketch = to_pil_image(sketch[0])
         im_sketch.save(f'{save_dir}/{i}_sketch.png')
 
         im_sketch_recon = Image.fromarray(sketch_recon)
         im_sketch_recon.save(f'{save_dir}/{i}_sketch_recon.png')
 
+        # Compute rates
+        bpp_sketch = sum([len(bin(int.from_bytes(s, sys.byteorder))) for s_batch in sketch_dict['strings'] for s in s_batch]) / (im_orig.size[0]*im_orig.size[1])
+        bpp_caption = sys.getsizeof(zlib.compress(caption.encode()))*8 / (im_orig.size[0]*im_orig.size[1])
+
         compressed = {'caption': caption,
                       'prior_strings':sketch_dict['strings'][0][0],
                       'hyper_strings':sketch_dict['strings'][1][0],
+                      'bpp_sketch' : bpp_sketch,
+                      'bpp_caption' : bpp_caption,
+                      'bpp_total' : bpp_sketch + bpp_caption
                       }
         with open(f'{save_dir}/{i}_caption.yaml', 'w') as file:
             yaml.dump(compressed, file)

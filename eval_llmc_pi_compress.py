@@ -19,8 +19,11 @@ import torch
 from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode, to_pil_image, adjust_sharpness
 import yaml
+import sys, zlib
 from argparse import ArgumentParser, Namespace
 
+prompt_pos = 'high quality'
+prompt_neg = 'disfigured, deformed, low quality, lowres, b&w, blurry, Photoshop, video game, bad art'
 
 def encode_rcc(model, clip, preprocess, im, N=5):
     """
@@ -37,17 +40,6 @@ def encode_rcc(model, clip, preprocess, im, N=5):
         idx: index selected
         seed: random seed used
     """
-    # apply_canny = HEDdetector()
-    # canny_map = HWC3(apply_canny(im))
-
-    # # compress sketch
-    # sketch = Image.fromarray(canny_map)
-    # sketch = ntc_preprocess(sketch).unsqueeze(0)
-    # with torch.no_grad():
-    #     sketch_dict = ntc_sketch.compress(sketch)
-    #     sketch_recon = ntc_sketch.decompress(sketch_dict['strings'], sketch_dict['shape'])['x_hat'][0]
-    #     sketch_recon = adjust_sharpness(sketch_recon, 2)
-    #     sketch_recon = HWC3((255*sketch_recon.permute(1,2,0)).numpy().astype(np.uint8))
     caption = prompt_inv.optimize_prompt(clip, preprocess, args_clip, 'cuda:0', target_images=[Image.fromarray(im)])
     # caption = caption_blip(blip, im)[0]
     
@@ -55,14 +47,14 @@ def encode_rcc(model, clip, preprocess, im, N=5):
     num_inference_steps = 25
 
     images = model(
-        caption,
+        f'{caption}, {prompt_pos}',
         generator = [torch.Generator(device="cuda").manual_seed(i) for i in range(N)],
         num_images_per_prompt=N,
         guidance_scale=guidance_scale,
         num_inference_steps=num_inference_steps,
         height=im.shape[0],
         width=im.shape[1],
-        # negative_prompt='black and white',
+        negative_prompt=prompt_neg,
         ).images
     dec_samples = np.stack([np.asarray(im) for im in images], axis=0)
     
@@ -80,25 +72,19 @@ def recon_rcc(model,  prompt, idx, N=5):
     Inputs:
 
     """
-    # # decode sketch
-    # with torch.no_grad():
-    #     sketch = ntc_sketch.decompress(sketch_dict['strings'], sketch_dict['shape'])['x_hat'][0]
-    #     sketch = adjust_sharpness(sketch, 2)
-    # sketch = HWC3((255*sketch.permute(1,2,0)).numpy().astype(np.uint8))
-
     # decode image
     guidance_scale = 9
     num_inference_steps = 25
 
     images = model(
-        caption,
+        f'{caption}, {prompt_pos}',
         generator = [torch.Generator(device="cuda").manual_seed(i) for i in range(N)],
         num_images_per_prompt=N,
         guidance_scale=guidance_scale,
         num_inference_steps=num_inference_steps,
         height=im.shape[0],
         width=im.shape[1],
-        # negative_prompt='black and white',
+        negative_prompt=prompt_neg,
         ).images
     dec_samples = np.stack([np.asarray(im) for im in images], axis=0)
 
@@ -149,23 +135,6 @@ if __name__ == '__main__':
     # dm = Kodak(root='~/data/Kodak', batch_size=1)
     dm = dataloaders.get_dataloader(args)
 
-    # apply_canny = HEDdetector()
-    # apply_canny = HEDdetector
-
-    # # Load ControlNet
-    # control_name = 'control_v11p_sd21_hed'
-    # # control_yaml = f'./models/{control_name}.yaml'
-    # control_yaml = 'cldm_v21.yaml'
-    # control_model = f'./models/{control_name}.ckpt'
-    # model = create_model(f'./models/{control_yaml}').cpu()
-    # # model.load_state_dict(load_state_dict('./models/v1-5-pruned.ckpt', location='cuda'), strict=False)
-    # model.load_state_dict(load_state_dict(control_model, location='cuda'), strict=False)
-    # model = model.cuda()
-
-
-    # load SD
-    
-
     model_id = "stabilityai/stable-diffusion-2-1-base"
     scheduler = DPMSolverMultistepScheduler.from_pretrained(model_id, subfolder="scheduler")
 
@@ -186,19 +155,6 @@ if __name__ == '__main__':
     args_clip = Namespace()
     args_clip.__dict__.update(prompt_inv.read_json("prompt_inversion/sample_config.json"))
     clip, _, clip_preprocess = open_clip.create_model_and_transforms(args_clip.clip_model, pretrained=args_clip.clip_pretrain, device='cuda:0')
-
-    # from argparse import Namespace
-    # import json
-    # args = Namespace()
-    # args.model_name = 'MeanScaleHyperpriorFull'
-    # args.lmbda = 1.0
-    # args.dist_name_model = "ms_ssim"
-    # args.orig_channels = 1
-    # ntc_sketch = models_compressai.get_models(args)
-    # saved = torch.load(f'models_ntc/OneShot_{args.model_name}_CLIC_HED_{args.dist_name_model}_lmbda{args.lmbda}.pt')
-    # ntc_sketch.load_state_dict(saved)
-    # ntc_sketch.eval()
-    # ntc_sketch.update()
 
     for i, x in tqdm.tqdm(enumerate(dm.test_dset)):
         x = x[0]
@@ -223,10 +179,14 @@ if __name__ == '__main__':
         # im_sketch_recon = Image.fromarray(sketch_recon)
         # im_sketch_recon.save(f'{save_dir}/{i}_sketch_recon.png')
 
+        # Compute rates
+        bpp_caption = sys.getsizeof(zlib.compress(caption.encode()))*8 / (im_orig.size[0]*im_orig.size[1])
+
         compressed = {'caption': caption,
-                    #   'prior_strings':sketch_dict['strings'][0][0],
-                    #   'hyper_strings':sketch_dict['strings'][1][0],
+                      'bpp_caption' : bpp_caption,
+                      'bpp_total' : bpp_caption
                       }
+
         with open(f'{save_dir}/{i}_caption.yaml', 'w') as file:
             yaml.dump(compressed, file)
             # file.write(caption)
