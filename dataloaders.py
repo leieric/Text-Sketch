@@ -8,9 +8,9 @@ import sys
 
 def get_dataloader(args):
     if args.dataset == 'CLIC':
-        return CLIC(root='~/data/CLIC/2021', batch_size=args.batch_size)
+        return CLIC(root=f'{args.data_root}/CLIC/2021', batch_size=args.batch_size)
     elif args.dataset == 'Kodak':
-        return Kodak(root='~/data/Kodak', batch_size=args.batch_size)
+        return Kodak(root=f'{args.data_root}/Kodak', batch_size=args.batch_size)
     else:
         print("Invalid dataset")
         sys.exit(0)

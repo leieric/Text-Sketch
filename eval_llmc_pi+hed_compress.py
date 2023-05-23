@@ -9,7 +9,7 @@ from cldm.model import create_model, load_state_dict
 from models_blip.blip import blip_decoder
 import tqdm
 import pathlib
-from diffusers import DPMSolverMultistepScheduler, StableDiffusionPipeline
+from diffusers import DPMSolverMultistepScheduler, StableDiffusionPipeline, StableDiffusionControlNetPipeline, ControlNetModel, UniPCMultistepScheduler
 import models_compressai
 import prompt_inversion.optim_utils as prompt_inv
 import prompt_inversion.open_clip as open_clip 
@@ -25,7 +25,7 @@ def recon(model, canny_map, prompt):
     dec = decode(model, canny_map, prompt, num_samples=2)
     return dec
 
-def encode_rcc(model, clip, preprocess, im, N=5):
+def encode_rcc(model, clip, preprocess, ntc_sketch, im, N=5):
     """
     Generates canny map and caption of image. 
     Then uses ControlNet to generate codebook, and select minimum distortion index.
@@ -40,17 +40,17 @@ def encode_rcc(model, clip, preprocess, im, N=5):
         idx: index selected
         seed: random seed used
     """
-    # apply_canny = HEDdetector()
-    # canny_map = HWC3(apply_canny(im))
+    apply_canny = HEDdetector()
+    canny_map = HWC3(apply_canny(im))
 
-    # # compress sketch
-    # sketch = Image.fromarray(canny_map)
-    # sketch = ntc_preprocess(sketch).unsqueeze(0)
-    # with torch.no_grad():
-    #     sketch_dict = ntc_sketch.compress(sketch)
-    #     sketch_recon = ntc_sketch.decompress(sketch_dict['strings'], sketch_dict['shape'])['x_hat'][0]
-    #     sketch_recon = adjust_sharpness(sketch_recon, 2)
-    #     sketch_recon = HWC3((255*sketch_recon.permute(1,2,0)).numpy().astype(np.uint8))
+    # compress sketch
+    sketch = Image.fromarray(canny_map)
+    sketch = ntc_preprocess(sketch).unsqueeze(0)
+    with torch.no_grad():
+        sketch_dict = ntc_sketch.compress(sketch)
+        sketch_recon = ntc_sketch.decompress(sketch_dict['strings'], sketch_dict['shape'])['x_hat'][0]
+        sketch_recon = adjust_sharpness(sketch_recon, 2)
+        sketch_recon = HWC3((255*sketch_recon.permute(1,2,0)).numpy().astype(np.uint8))
     caption = prompt_inv.optimize_prompt(clip, preprocess, args_clip, 'cuda:0', target_images=[Image.fromarray(im)])
     # caption = caption_blip(blip, im)[0]
     
@@ -59,9 +59,10 @@ def encode_rcc(model, clip, preprocess, im, N=5):
 
     images = model(
         caption,
+        Image.fromarray(sketch_recon),
         generator = [torch.Generator(device="cuda").manual_seed(i) for i in range(N)],
         num_images_per_prompt=N,
-        guidance_scale=guidance_scale,
+        # guidance_scale=guidance_scale,
         num_inference_steps=num_inference_steps,
         height=im.shape[0],
         width=im.shape[1],
@@ -74,20 +75,20 @@ def encode_rcc(model, clip, preprocess, im, N=5):
     loss = np.sum((np.repeat(im[None, :], N, axis=0)-dec_samples)**2, axis=(1,2,3))
     idx = np.argmin(loss)
     
-    return caption, idx
+    return caption, sketch, sketch_dict, idx
 
-def recon_rcc(model,  prompt, idx, N=5):
+def recon_rcc(model,  ntc_sketch, caption, sketch_dict, idx, N=5):
     """
     Takes canny map and caption to generate codebook. 
     Outputs codebook[idx], where idx is selected from encoder.
     Inputs:
 
     """
-    # # decode sketch
-    # with torch.no_grad():
-    #     sketch = ntc_sketch.decompress(sketch_dict['strings'], sketch_dict['shape'])['x_hat'][0]
-    #     sketch = adjust_sharpness(sketch, 2)
-    # sketch = HWC3((255*sketch.permute(1,2,0)).numpy().astype(np.uint8))
+    # decode sketch
+    with torch.no_grad():
+        sketch = ntc_sketch.decompress(sketch_dict['strings'], sketch_dict['shape'])['x_hat'][0]
+        sketch = adjust_sharpness(sketch, 2)
+    sketch = HWC3((255*sketch.permute(1,2,0)).numpy().astype(np.uint8))
 
     # decode image
     guidance_scale = 9
@@ -95,9 +96,10 @@ def recon_rcc(model,  prompt, idx, N=5):
 
     images = model(
         caption,
+        Image.fromarray(sketch),
         generator = [torch.Generator(device="cuda").manual_seed(i) for i in range(N)],
         num_images_per_prompt=N,
-        guidance_scale=guidance_scale,
+        # guidance_scale=guidance_scale,
         num_inference_steps=num_inference_steps,
         height=im.shape[0],
         width=im.shape[1],
@@ -109,14 +111,11 @@ def recon_rcc(model,  prompt, idx, N=5):
     # canny_map = dec_samples[0]
     # dec_samples = np.stack(dec_samples[1:]) # [num_samples, w, h, 3]
     # return dec_samples[idx,:]
-    return images
+    return images, sketch
 
 def ntc_preprocess(image):
-    # transform = transforms.Compose(
-    #         [transforms.Grayscale(), transforms.ToTensor()]
-    #     )
     transform = transforms.Compose(
-            [transforms.ToTensor()]
+            [transforms.Grayscale(), transforms.ToTensor()]
         )
     image = transform(image)
     return image
@@ -164,25 +163,34 @@ if __name__ == '__main__':
     # # model.load_state_dict(load_state_dict('./models/v1-5-pruned.ckpt', location='cuda'), strict=False)
     # model.load_state_dict(load_state_dict(control_model, location='cuda'), strict=False)
     # model = model.cuda()
+    sd_model_id = "stabilityai/stable-diffusion-2-1-base"
+    # controlnet = ControlNetModel.from_pretrained("lllyasviel/sd-controlnet-hed", torch_dtype=torch.float16)
+    controlnet = ControlNetModel.from_pretrained("thibaud/controlnet-sd21-hed-diffusers", torch_dtype=torch.float16)
+    model = StableDiffusionControlNetPipeline.from_pretrained(
+        sd_model_id, controlnet=controlnet, torch_dtype=torch.float16, revision="fp16",
+    )
+    model.scheduler = UniPCMultistepScheduler.from_config(model.scheduler.config)
+    model.enable_xformers_memory_efficient_attention()
+    model.enable_model_cpu_offload()
 
 
     # load SD
     
 
-    model_id = "stabilityai/stable-diffusion-2-1-base"
-    scheduler = DPMSolverMultistepScheduler.from_pretrained(model_id, subfolder="scheduler")
+    # model_id = "stabilityai/stable-diffusion-2-1-base"
+    # scheduler = DPMSolverMultistepScheduler.from_pretrained(model_id, subfolder="scheduler")
 
-    model = StableDiffusionPipeline.from_pretrained(
-        model_id,
-        scheduler=scheduler,
-        torch_dtype=torch.float16,
-        revision="fp16",
-        )
-    model = model.to('cuda:0')
-    model.enable_xformers_memory_efficient_attention()
+    # model = StableDiffusionPipeline.from_pretrained(
+    #     model_id,
+    #     scheduler=scheduler,
+    #     torch_dtype=torch.float16,
+    #     revision="fp16",
+    #     )
+    # model = model.to('cuda:0')
+    # model.enable_xformers_memory_efficient_attention()
 
     # Make savedir
-    save_dir = f'recon_examples/SD_pi/{args.dataset}_recon'
+    save_dir = f'recon_examples/SD_pi+hed/{args.dataset}_recon'
     pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
 
     # Load CLIP
@@ -192,24 +200,24 @@ if __name__ == '__main__':
 
     # from argparse import Namespace
     # import json
-    # args = Namespace()
-    # args.model_name = 'MeanScaleHyperpriorFull'
-    # args.lmbda = 1.0
-    # args.dist_name_model = "ms_ssim"
-    # args.orig_channels = 1
-    # ntc_sketch = models_compressai.get_models(args)
-    # saved = torch.load(f'models_ntc/OneShot_{args.model_name}_CLIC_HED_{args.dist_name_model}_lmbda{args.lmbda}.pt')
-    # ntc_sketch.load_state_dict(saved)
-    # ntc_sketch.eval()
-    # ntc_sketch.update()
+    args_ntc = Namespace()
+    args_ntc.model_name = 'MeanScaleHyperpriorFull'
+    args_ntc.lmbda = 1.0
+    args_ntc.dist_name_model = "ms_ssim"
+    args_ntc.orig_channels = 1
+    ntc_sketch = models_compressai.get_models(args_ntc)
+    saved = torch.load(f'models_ntc/OneShot_{args_ntc.model_name}_CLIC_HED_{args_ntc.dist_name_model}_lmbda{args_ntc.lmbda}.pt')
+    ntc_sketch.load_state_dict(saved)
+    ntc_sketch.eval()
+    ntc_sketch.update()
 
     for i, x in tqdm.tqdm(enumerate(dm.test_dset)):
         x = x[0]
         x_im = (255*x.permute(1,2,0)).numpy().astype(np.uint8)
         im = resize_image(HWC3(x_im), 512)
         
-        caption, idx = encode_rcc(model, clip, clip_preprocess, im, args.N)
-        xhat = recon_rcc(model, caption, idx,  args.N)
+        caption, sketch, sketch_dict, idx = encode_rcc(model, clip, clip_preprocess, ntc_sketch, im, args.N)
+        xhat, sketch_recon = recon_rcc(model, ntc_sketch, caption, sketch_dict, idx,  args.N)
 
         im_orig = Image.fromarray(im)
         im_orig.save(f'{save_dir}/{i}_gt.png')
@@ -219,16 +227,16 @@ if __name__ == '__main__':
         # im_recon = Image.fromarray(xhat)
         # im_recon.save(f'{save_dir}/{i}_recon.png')
 
-        # im_sketch = Image.fromarray(sketch)
-        # im_sketch = to_pil_image(sketch[0])
-        # im_sketch.save(f'{save_dir}/{i}_sketch.png')
+        im_sketch = Image.fromarray(sketch)
+        im_sketch = to_pil_image(sketch[0])
+        im_sketch.save(f'{save_dir}/{i}_sketch.png')
 
-        # im_sketch_recon = Image.fromarray(sketch_recon)
-        # im_sketch_recon.save(f'{save_dir}/{i}_sketch_recon.png')
+        im_sketch_recon = Image.fromarray(sketch_recon)
+        im_sketch_recon.save(f'{save_dir}/{i}_sketch_recon.png')
 
         compressed = {'caption': caption,
-                    #   'prior_strings':sketch_dict['strings'][0][0],
-                    #   'hyper_strings':sketch_dict['strings'][1][0],
+                      'prior_strings':sketch_dict['strings'][0][0],
+                      'hyper_strings':sketch_dict['strings'][1][0],
                       }
         with open(f'{save_dir}/{i}_caption.yaml', 'w') as file:
             yaml.dump(compressed, file)
