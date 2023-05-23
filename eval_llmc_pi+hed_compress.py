@@ -1,11 +1,9 @@
 import torch
 from dataloaders import CLIC, Kodak
 import matplotlib.pyplot as plt
-from canny2image import decode
 import numpy as np
 from annotator.hed import HEDdetector
 from annotator.util import HWC3, resize_image
-from cldm.model import create_model, load_state_dict
 from models_blip.blip import blip_decoder
 import tqdm
 import pathlib
@@ -21,9 +19,6 @@ from torchvision.transforms.functional import InterpolationMode, to_pil_image, a
 import yaml
 from argparse import ArgumentParser, Namespace
 
-def recon(model, canny_map, prompt):
-    dec = decode(model, canny_map, prompt, num_samples=2)
-    return dec
 
 def encode_rcc(model, clip, preprocess, ntc_sketch, im, N=5):
     """
