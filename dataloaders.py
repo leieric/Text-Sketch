@@ -11,6 +11,8 @@ def get_dataloader(args):
         return CLIC(root=f'{args.data_root}/CLIC/2021', batch_size=args.batch_size)
     elif args.dataset == 'Kodak':
         return Kodak(root=f'{args.data_root}/Kodak', batch_size=args.batch_size)
+    elif args.dataset == 'DIV2K':
+        return DIV2K(root=f'{args.data_root}/Kodak', batch_size=args.batch_size)
     else:
         print("Invalid dataset")
         sys.exit(0)
@@ -34,6 +36,26 @@ class CLIC(LightningDataModule):
 
     def val_dataloader(self):
         loader = DataLoader(self.val_dset, batch_size=self.batch_size, num_workers=4, pin_memory=True, persistent_workers=True, drop_last=True)
+        return loader
+
+    def test_dataloader(self):
+        loader = DataLoader(self.test_dset, batch_size=self.batch_size, num_workers=4, pin_memory=True, persistent_workers=True, drop_last=True)
+        return loader
+    
+class DIV2K(LightningDataModule):
+    def __init__(self, root, batch_size):
+        super().__init__()
+        self.root = root
+        self.batch_size = batch_size
+        # self.train=train
+        transform = transforms.Compose(
+            [transforms.ToTensor()]
+        )
+        self.train_dset = ImageFolder(root=self.root + '/train', transform=transform)
+        self.test_dset = ImageFolder(root=self.root + '/val', transform=transform)
+
+    def train_dataloader(self):
+        loader = DataLoader(self.train_dset, batch_size=self.batch_size, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True, drop_last=True)
         return loader
 
     def test_dataloader(self):
