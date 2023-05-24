@@ -1,6 +1,4 @@
-addict==2.4.0
-basicsr==1.4.2
-cityscapesscripts==2.2.2
+python==3.8
 compressai==1.2.4
 diffusers==0.14.0
 einops==0.3.0
@@ -17,7 +15,6 @@ opencv_python==4.7.0.72
 opencv_python_headless==4.7.0.72
 packaging==23.1
 parrots==0.1.7
-Pillow==9.4.0
 Pillow==9.5.0
 prettytable==3.7.0
 pytorch_lightning==1.5.0

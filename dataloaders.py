@@ -12,7 +12,7 @@ def get_dataloader(args):
     elif args.dataset == 'Kodak':
         return Kodak(root=f'{args.data_root}/Kodak', batch_size=args.batch_size)
     elif args.dataset == 'DIV2K':
-        return DIV2K(root=f'{args.data_root}/Kodak', batch_size=args.batch_size)
+        return DIV2K(root=f'{args.data_root}/DIV2K', batch_size=args.batch_size)
     else:
         print("Invalid dataset")
         sys.exit(0)
