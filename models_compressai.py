@@ -57,7 +57,7 @@ def get_models(args):
     elif args.model_name == 'Cheng2020AttentionFull':
         return Cheng2020AttentionCustom(192, args.orig_channels)
     elif args.model_name == 'mbt2018_mean':
-        return mbt2018_mean(quality=1, metric="mse", pretrained=True)
+        return mbt2018_mean(quality=1, metric="ms-ssim", pretrained=True)
     elif args.model_name == 'BlockMeanScaleHyperpriorFull':
         print(f'Block size={args.batch_size}')
         return BlockMeanScaleHyperpriorFull(48, 64, args.batch_size)
