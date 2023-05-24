@@ -21,6 +21,14 @@ from torchvision.transforms.functional import InterpolationMode, to_pil_image, a
 import yaml
 import sys, zlib
 from argparse import ArgumentParser, Namespace
+import lpips
+
+def get_loss(args):
+    if args.loss == 'lpips':
+        return lpips.LPIPS(net='alex') 
+    else:
+        sys.exit('Not a valid loss')
+
 
 prompt_pos = 'high quality'
 prompt_neg = 'disfigured, deformed, low quality, lowres, b&w, blurry, Photoshop, video game, bad art'
@@ -46,22 +54,29 @@ def encode_rcc(model, clip, preprocess, im, N=5):
     guidance_scale = 9
     num_inference_steps = 25
 
-    images = model(
-        f'{caption}, {prompt_pos}',
-        generator = [torch.Generator(device="cuda").manual_seed(i) for i in range(N)],
-        num_images_per_prompt=N,
-        guidance_scale=guidance_scale,
-        num_inference_steps=num_inference_steps,
-        height=im.shape[0],
-        width=im.shape[1],
-        negative_prompt=prompt_neg,
-        ).images
-    dec_samples = np.stack([np.asarray(im) for im in images], axis=0)
+    n_batches = N // 8 
+    images = []
+    for b in range(n_batches):
+        images.extend(model(
+            f'{caption}, {prompt_pos}',
+            generator = [torch.Generator(device="cuda").manual_seed(i) for i in range(8)],
+            num_images_per_prompt=8,
+            guidance_scale=guidance_scale,
+            num_inference_steps=num_inference_steps,
+            height=im.shape[0],
+            width=im.shape[1],
+            negative_prompt=prompt_neg,
+            ).images)
+    # dec_samples = np.stack([np.asarray(im) for im in images], axis=0)
+    dec_samples = torch.stack([lpips_preprocess(x) for x in images], dim=0)
+    orig_samples = lpips_preprocess(im).repeat(N, 1, 1, 1)
+    loss = loss_func(orig_samples, dec_samples).squeeze()
     
     # dec_samples, seed = decode(model, sketch_recon, caption, seed=-1, num_samples=N) # first one is the edge map
     # dec_samples = np.stack(dec_samples[1:]) # [num_samples, w, h, 3]
-    loss = np.sum((np.repeat(im[None, :], N, axis=0)-dec_samples)**2, axis=(1,2,3))
-    idx = np.argmin(loss)
+    # loss = np.sum((np.repeat(im[None, :], N, axis=0)-dec_samples)**2, axis=(1,2,3))
+
+    idx = torch.argmin(loss)
     
     return caption, idx
 
@@ -76,23 +91,26 @@ def recon_rcc(model,  prompt, idx, N=5):
     guidance_scale = 9
     num_inference_steps = 25
 
-    images = model(
-        f'{caption}, {prompt_pos}',
-        generator = [torch.Generator(device="cuda").manual_seed(i) for i in range(N)],
-        num_images_per_prompt=N,
-        guidance_scale=guidance_scale,
-        num_inference_steps=num_inference_steps,
-        height=im.shape[0],
-        width=im.shape[1],
-        negative_prompt=prompt_neg,
-        ).images
-    dec_samples = np.stack([np.asarray(im) for im in images], axis=0)
+    n_batches = N // 8 
+    images = []
+    for b in range(n_batches):
+        images.extend(model(
+            f'{prompt}, {prompt_pos}',
+            generator = [torch.Generator(device="cuda").manual_seed(i) for i in range(8)],
+            num_images_per_prompt=8,
+            guidance_scale=guidance_scale,
+            num_inference_steps=num_inference_steps,
+            height=im.shape[0],
+            width=im.shape[1],
+            negative_prompt=prompt_neg,
+            ).images)
+    # dec_samples = np.stack([np.asarray(im) for im in images], axis=0)
 
     # dec_samples = decode(model, sketch, prompt, seed=seed, num_samples=N) # first one is the edge map
     # canny_map = dec_samples[0]
     # dec_samples = np.stack(dec_samples[1:]) # [num_samples, w, h, 3]
     # return dec_samples[idx,:]
-    return images
+    return images[idx]
 
 def ntc_preprocess(image):
     # transform = transforms.Compose(
@@ -100,6 +118,13 @@ def ntc_preprocess(image):
     #     )
     transform = transforms.Compose(
             [transforms.ToTensor()]
+        )
+    image = transform(image)
+    return image
+
+def lpips_preprocess(image):
+    transform = transforms.Compose(
+            [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
         )
     image = transform(image)
     return image
@@ -130,11 +155,13 @@ if __name__ == '__main__':
     parser.add_argument('--N', default=1, type=int)
     parser.add_argument('--dataset', default='Kodak', type=str)
     parser.add_argument('--data_root', default='/home/Shared/image_datasets', type=str)
+    parser.add_argument('--loss', default='lpips', type=str)
 
     args = parser.parse_args()
     # dm = Kodak(root='~/data/Kodak', batch_size=1)
     dm = dataloaders.get_dataloader(args)
 
+    # Load Stable Diffusion
     model_id = "stabilityai/stable-diffusion-2-1-base"
     scheduler = DPMSolverMultistepScheduler.from_pretrained(model_id, subfolder="scheduler")
 
@@ -146,9 +173,13 @@ if __name__ == '__main__':
         )
     model = model.to('cuda:0')
     model.enable_xformers_memory_efficient_attention()
+    # model.enable_attention_slicing()
+
+    # Load loss
+    loss_func = get_loss(args)
 
     # Make savedir
-    save_dir = f'recon_examples/SD_pi/{args.dataset}_recon'
+    save_dir = f'recon_examples/SD_pi_{args.loss}/{args.dataset}_recon'
     pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
 
     # Load CLIP
@@ -167,10 +198,10 @@ if __name__ == '__main__':
         im_orig = Image.fromarray(im)
         im_orig.save(f'{save_dir}/{i}_gt.png')
 
-        for j, im_recon in enumerate(xhat):
-            im_recon.save(f'{save_dir}/{i}_recon_{j}.png')
+        # for j, im_recon in enumerate(xhat):
+        #     im_recon.save(f'{save_dir}/{i}_recon_{j}.png')
         # im_recon = Image.fromarray(xhat)
-        # im_recon.save(f'{save_dir}/{i}_recon.png')
+        xhat.save(f'{save_dir}/{i}_recon.png')
 
         # im_sketch = Image.fromarray(sketch)
         # im_sketch = to_pil_image(sketch[0])
