@@ -249,3 +249,20 @@ def measure_similarity(orig_images, images, ref_model, ref_clip_preprocess, devi
         gen_feat = gen_feat / gen_feat.norm(dim=1, keepdim=True)
         
         return (ori_feat @ gen_feat.t()).mean().item()
+    
+
+def clip_cosine(orig_images, images, ref_model, ref_clip_preprocess, device):
+    with torch.no_grad():
+        ori_batch = [ref_clip_preprocess(i).unsqueeze(0) for i in orig_images]
+        ori_batch = torch.cat(ori_batch).to(device)
+
+        gen_batch = [ref_clip_preprocess(i).unsqueeze(0) for i in images]
+        gen_batch = torch.cat(gen_batch).to(device)
+        
+        ori_feat = ref_model.encode_image(ori_batch)
+        gen_feat = ref_model.encode_image(gen_batch)
+        
+        ori_feat = ori_feat / ori_feat.norm(dim=1, keepdim=True)
+        gen_feat = gen_feat / gen_feat.norm(dim=1, keepdim=True)
+        
+        return (ori_feat @ gen_feat.t()).diag()
