@@ -38,7 +38,7 @@ def get_loss(args):
 prompt_pos = 'high quality'
 prompt_neg = 'disfigured, deformed, low quality, lowres, b&w, blurry, Photoshop, video game, bad art'
 
-def encode_rcc(model, clip, preprocess, im, N=5):
+def encode_rcc(model, clip, preprocess, im, N=5, i=0):
     """
     Generates canny map and caption of image. 
     Then uses ControlNet to generate codebook, and select minimum distortion index.
@@ -53,7 +53,13 @@ def encode_rcc(model, clip, preprocess, im, N=5):
         idx: index selected
         seed: random seed used
     """
-    caption = prompt_inv.optimize_prompt(clip, preprocess, args_clip, 'cuda:0', target_images=[Image.fromarray(im)])
+    if i > 0:
+        with open(f'recon_examples/SD_pi+hed_lpips_sketch0.5/DIV2K_recon/{i}_caption.yaml', 'r') as file:
+            caption_dict = yaml.safe_load(file)
+        caption = caption_dict['caption']
+    else:
+        caption = prompt_inv.optimize_prompt(clip, preprocess, args_clip, 'cuda:0', target_images=[Image.fromarray(im)])
+    # caption = prompt_inv.optimize_prompt(clip, preprocess, args_clip, 'cuda:0', target_images=[Image.fromarray(im)])
     # caption = caption_blip(blip, im)[0]
     
     guidance_scale = 9
@@ -197,7 +203,8 @@ if __name__ == '__main__':
         x_im = (255*x.permute(1,2,0)).numpy().astype(np.uint8)
         im = resize_image(HWC3(x_im), 512)
         
-        caption, idx = encode_rcc(model, clip, clip_preprocess, im, args.N)
+        # caption, idx = encode_rcc(model, clip, clip_preprocess, im, args.N)
+        caption, idx = encode_rcc(model, clip, clip_preprocess, im, args.N, i)
         xhat = recon_rcc(model, caption, idx,  args.N)
 
         im_orig = Image.fromarray(im)

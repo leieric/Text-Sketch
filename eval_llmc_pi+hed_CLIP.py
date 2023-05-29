@@ -35,7 +35,7 @@ def get_loss(args):
 prompt_pos = 'high quality'
 prompt_neg = 'disfigured, deformed, low quality, lowres, b&w, blurry, Photoshop, video game, bad art'
 
-def encode_rcc(model, clip, preprocess, ntc_sketch, im, N=5):
+def encode_rcc(model, clip, preprocess, ntc_sketch, im, N=5, i=0):
     """
     Generates canny map and caption of image. 
     Then uses ControlNet to generate codebook, and select minimum distortion index.
@@ -61,7 +61,13 @@ def encode_rcc(model, clip, preprocess, ntc_sketch, im, N=5):
         sketch_recon = ntc_sketch.decompress(sketch_dict['strings'], sketch_dict['shape'])['x_hat'][0]
         sketch_recon = adjust_sharpness(sketch_recon, 2)
         sketch_recon = HWC3((255*sketch_recon.permute(1,2,0)).numpy().astype(np.uint8))
-    caption = prompt_inv.optimize_prompt(clip, preprocess, args_clip, 'cuda:0', target_images=[Image.fromarray(im)])
+    
+    if i > 0:
+        with open(f'recon_examples/SD_pi+hed_lpips_sketch0.5/DIV2K_recon/{i}_caption.yaml', 'r') as file:
+            caption_dict = yaml.safe_load(file)
+        caption = caption_dict['caption']
+    else:
+        caption = prompt_inv.optimize_prompt(clip, preprocess, args_clip, 'cuda:0', target_images=[Image.fromarray(im)])
     # caption = caption_blip(blip, im)[0]
     
     guidance_scale = 9
@@ -205,7 +211,9 @@ if __name__ == '__main__':
 
     # Make savedir
     save_dir = f'recon_examples/SD_pi+hed_{args.loss}_sketch{args_ntc.lmbda}/{args.dataset}_recon'
+    sketch_dir = f'recon_examples/SD_pi+hed_{args.loss}_sketch{args_ntc.lmbda}/{args.dataset}_sketch'
     pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
+    pathlib.Path(sketch_dir).mkdir(parents=True, exist_ok=True)
 
     for i, x in tqdm.tqdm(enumerate(dm.test_dset)):
         # Resize to 512
@@ -215,22 +223,23 @@ if __name__ == '__main__':
         # im = HWC3(x_im)
         
         # Encode and decode
-        caption, sketch, sketch_dict, idx = encode_rcc(model, clip, clip_preprocess, ntc_sketch, im, args.N)
+        # caption, sketch, sketch_dict, idx = encode_rcc(model, clip, clip_preprocess, ntc_sketch, im, args.N)
+        caption, sketch, sketch_dict, idx = encode_rcc(model, clip, clip_preprocess, ntc_sketch, im, args.N, i)
         xhat, sketch_recon = recon_rcc(model, ntc_sketch, caption, sketch_dict, idx,  args.N)
 
         # Save ground-truth image
         im_orig = Image.fromarray(im)
-        im_orig.save(f'{save_dir}/{i}_gt.png')
+        im_orig.save(f'{sketch_dir}/{i}_gt.png')
 
         # Save reconstructions
         xhat.save(f'{save_dir}/{i}_recon.png')
 
         # Save sketch images
         im_sketch = to_pil_image(sketch[0])
-        im_sketch.save(f'{save_dir}/{i}_sketch.png')
+        im_sketch.save(f'{sketch_dir}/{i}_sketch.png')
 
         im_sketch_recon = Image.fromarray(sketch_recon)
-        im_sketch_recon.save(f'{save_dir}/{i}_sketch_recon.png')
+        im_sketch_recon.save(f'{sketch_dir}/{i}_sketch_recon.png')
 
         # Compute rates
         bpp_sketch = sum([len(bin(int.from_bytes(s, sys.byteorder))) for s_batch in sketch_dict['strings'] for s in s_batch]) / (im_orig.size[0]*im_orig.size[1])
