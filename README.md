@@ -1,4 +1,4 @@
-# Text + Sketch
+# Text + Sketch Compression via Text-to-Image Models
 
 Implementation for [Text + Sketch: Image Compression at Ultra Low Rates](https://arxiv.org/abs/2307.01944). 
 
