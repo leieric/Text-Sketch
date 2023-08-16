@@ -16,7 +16,11 @@ The dataloading assumes pytorch ImageFolder layouts inside DATA_ROOT. See `datal
 * pytorch
 * compressai
 * diffusers
-* 
+
+## Notes
+* Since ControlNet was trained on uncompressed HED maps (the sketch), and not the decompressed ones, if the rate is set too low for the sketch, this can cause poor reconstructions for many image types.
+* The performance of PICS is dependent on the ControlNet model used (here we use SD), but any improved ControlNet model released in the future can be easily integrated into the text + sketch setup
+* Fine-tuning the models are currently in-progress
 
 ## Citation
 
