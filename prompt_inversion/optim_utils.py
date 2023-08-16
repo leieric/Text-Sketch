@@ -8,8 +8,8 @@ import copy
 import json
 from typing import Any, Mapping
 
-# from . import open_clip
-import open_clip
+from . import open_clip
+# import open_clip
 
 import torch
 

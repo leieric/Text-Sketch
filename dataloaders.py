@@ -7,18 +7,20 @@ from torchvision.transforms import ToTensor
 import sys
 
 def get_dataloader(args):
-    if args.dataset == 'CLIC':
-        return CLIC(root=f'{args.data_root}/CLIC/2021', batch_size=args.batch_size)
+    if args.dataset == 'CLIC2020':
+        return CLIC(root=f'{args.data_root}/CLIC/2020')
+    elif args.dataset == 'CLIC2021':
+        return CLIC(root=f'{args.data_root}/CLIC/2021')
     elif args.dataset == 'Kodak':
-        return Kodak(root=f'{args.data_root}/Kodak', batch_size=args.batch_size)
+        return Kodak(root=f'{args.data_root}/Kodak')
     elif args.dataset == 'DIV2K':
-        return DIV2K(root=f'{args.data_root}/DIV2K', batch_size=args.batch_size)
+        return DIV2K(root=f'{args.data_root}/DIV2K')
     else:
         print("Invalid dataset")
         sys.exit(0)
 
 class CLIC(LightningDataModule):
-    def __init__(self, root, batch_size):
+    def __init__(self, root, batch_size=1):
         super().__init__()
         self.root = root
         self.batch_size = batch_size
@@ -43,7 +45,7 @@ class CLIC(LightningDataModule):
         return loader
     
 class DIV2K(LightningDataModule):
-    def __init__(self, root, batch_size):
+    def __init__(self, root, batch_size=1):
         super().__init__()
         self.root = root
         self.batch_size = batch_size
@@ -63,7 +65,7 @@ class DIV2K(LightningDataModule):
         return loader
     
 class Kodak(LightningDataModule):
-    def __init__(self, root, batch_size):
+    def __init__(self, root, batch_size=1):
         super().__init__()
         self.root = root
         self.batch_size = batch_size
