@@ -39,7 +39,7 @@ def encode_rcc(model, clip, preprocess, ntc_sketch, im, N=5, i=0):
     Then uses ControlNet to generate codebook, and select minimum distortion index.
     Inputs: 
         model: ControlNet model
-        blip: BLIP captioning model
+        clip: CLIP model
         im: image to compress
         N: number of candidates to generate
     Outputs:
