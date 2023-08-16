@@ -16,6 +16,14 @@ The dataloading assumes pytorch ImageFolder layouts inside DATA_ROOT. See `datal
 * pytorch
 * compressai
 * diffusers
+* pytorch-lightning
+* opencv-python
+* einops
+* ftfy
+* sentence-transformers
+* accelerate
+* xformers
+* basicsr
 
 ## Notes
 * Since ControlNet was trained on uncompressed HED maps (the sketch), and not the decompressed ones, if the rate is set too low for the sketch, this can cause poor reconstructions for many image types.
