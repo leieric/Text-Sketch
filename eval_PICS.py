@@ -130,10 +130,11 @@ def ntc_preprocess(image):
 
 if __name__ == '__main__':
     parser = ArgumentParser()
-    parser.add_argument('--N', default=1, type=int)
-    parser.add_argument('--dataset', default='Kodak', type=str)
+    parser.add_argument('--N', default=4, type=int)
+    parser.add_argument('--dataset', default='CLIC2020', type=str)
     parser.add_argument('--data_root', default='/home/Shared/image_datasets', type=str)
     parser.add_argument('--loss', default='clip', type=str)
+    parser.add_argument('--lam_sketch', default=1.0, type=str)
 
     args = parser.parse_args()
     # dm = Kodak(root='~/data/Kodak', batch_size=1)
@@ -162,7 +163,7 @@ if __name__ == '__main__':
     # import json
     args_ntc = Namespace()
     args_ntc.model_name = 'Cheng2020AttentionFull'
-    args_ntc.lmbda = 0.5
+    args_ntc.lmbda = args.lam_sketch
     args_ntc.dist_name_model = "ms_ssim"
     args_ntc.orig_channels = 1
     ntc_sketch = models_compressai.get_models(args_ntc)

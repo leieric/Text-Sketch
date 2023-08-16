@@ -113,8 +113,8 @@ def ntc_preprocess(image):
 
 if __name__ == '__main__':
     parser = ArgumentParser()
-    parser.add_argument('--N', default=1, type=int)
-    parser.add_argument('--dataset', default='Kodak', type=str)
+    parser.add_argument('--N', default=4, type=int)
+    parser.add_argument('--dataset', default='CLIC2020', type=str)
     parser.add_argument('--data_root', default='/home/Shared/image_datasets', type=str)
     parser.add_argument('--loss', default='clip', type=str)
 
