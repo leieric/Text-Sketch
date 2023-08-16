@@ -24,7 +24,7 @@ The dataloading assumes pytorch ImageFolder layouts inside DATA_ROOT. See `datal
 
 ## Citation
 
-    @inproceedings{lei2023text+,
+    @inproceedings{lei2023text+sketch,
       title={Text+ Sketch: Image Compression at Ultra Low Rates},
       author={Lei, Eric and Uslu, Yi\u{g}it Berkay and Hassani, Hamed and Bidokhti, Shirin Saeedi},
       booktitle={ICML 2023 Workshop on Neural Compression: From Information Theory to Applications},
