@@ -9,8 +9,10 @@ The following scripts will loop through a dataset, and then output the results (
 
 For example, `python eval_PICS.py --data_root DATA_ROOT` will run PICS, where the images are contained in the DATA_ROOT folder. 
 
+The `annotator` directory is taken from the [ControlNet repo](https://github.com/lllyasviel/ControlNet.git), and the `prompt_inversion` directory is based off of the [Hard Prompts Made Easy repo](https://github.com/YuxinWenRick/hard-prompts-made-easy/tree/main).
+
 ## Dataloaders
-The dataloading assumes pytorch ImageFolder layouts inside DATA_ROOT. See `dataloaders.py` for more details. For CLIC2020, we use the train/valid/test splits from the [tensorflow builder](https://github.com/tensorflow/datasets/blob/master/tensorflow_datasets/datasets/clic/clic_dataset_builder.py).
+The dataloading assumes pytorch ImageFolder layouts inside DATA_ROOT. See `dataloaders.py` for more details. 
 
 ## Dependencies
 * pytorch
