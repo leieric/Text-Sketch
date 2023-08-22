@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# fidelity --fid --batch-size 1 --gpu 0 --input1 recon_examples/PIC_clip/CLIC2020_recon \
+# --input2 /home/Shared/image_datasets/CLIC_resized/2020/train/1/ --input2-cache-name CLIC2020_resized-train
+
+fidelity --fid --batch-size 1 --gpu 0 --input1 recon_examples/PICS_clip_ntclam0.5/CLIC2020_recon \
+--input2 /home/Shared/image_datasets/CLIC_resized/2020/train/1/ --input2-cache-name CLIC2020_resized-train
+# FID=110.2804
+
 # fidelity --fid --batch-size 1 --gpu 0 --input1 recon_examples/SD_pi+hed_clip_sketch0.5/CLIC_recon \
 # --input2 /home/Shared/image_datasets/CLIC_resized/2021/train/1/ --input2-cache-name CLIC_resized-train
 
@@ -9,8 +16,8 @@
 # fidelity --fid --batch-size 1 --gpu 0 --input1 recon_examples/c2020_lowrate/CLIC/q1_ms_ssim \
 # --input2 /home/Shared/image_datasets/CLIC_resized/2021/train/1/ --input2-cache-name CLIC_resized-train
 
-fidelity --fid --batch-size 1 --gpu 0 --input1 ../HiFiC/data/reconstructions/CLIC/ultra3 \
---input2 /home/Shared/image_datasets/CLIC_resized/2021/train/1/ --input2-cache-name CLIC_resized-train
+# fidelity --fid --batch-size 1 --gpu 0 --input1 ../HiFiC/data/reconstructions/CLIC/ultra3 \
+# --input2 /home/Shared/image_datasets/CLIC_resized/2021/train/1/ --input2-cache-name CLIC_resized-train
 
 # fidelity --fid --batch-size 1 --gpu 2 --input1 recon_examples/mbt2018_lowrate/DIV2K/q1_ms_ssim \
 # --input2 /home/Shared/image_datasets/DIV2K_resized/train/1/ --input2-cache-name DIV2K_resized-train

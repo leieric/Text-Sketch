@@ -62,11 +62,11 @@ def encode_rcc(model, clip, preprocess, ntc_sketch, im, N=5, i=0):
     
     # Optionally load saved captions
     # if i > 0:
-    #     with open(f'recon_examples/SD_pi+hed_lpips_sketch0.5/DIV2K_recon/{i}_caption.yaml', 'r') as file:
-    #         caption_dict = yaml.safe_load(file)
-    #     caption = caption_dict['caption']
+    with open(f'recon_examples/PICS_clip_ntclam1.0/CLIC2020_recon/{i}_caption.yaml', 'r') as file:
+        caption_dict = yaml.safe_load(file)
+    caption = caption_dict['caption']
     # else:
-    caption = prompt_inv.optimize_prompt(clip, preprocess, args_clip, 'cuda:0', target_images=[Image.fromarray(im)])
+    #     caption = prompt_inv.optimize_prompt(clip, preprocess, args_clip, 'cuda:0', target_images=[Image.fromarray(im)])
     
     guidance_scale = 9
     num_inference_steps = 25
