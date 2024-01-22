@@ -14,8 +14,10 @@ The `annotator` directory is taken from the [ControlNet repo](https://github.com
 ## Dataloaders
 The dataloading assumes pytorch ImageFolder layouts inside DATA_ROOT. See `dataloaders.py` for more details. 
 
-## NTC Sketch Training 
+## Sketch NTC Models
 A training script is provided in `train_compressai.py`, which is slightly modified from CompressAI's example training script. See `scripts/train_sketch.sh` example usage. To generate sketch training data, apply one of the filters in `annotator/` to training images, and structure folder to fit the [CompressAI ImageFolder](https://interdigitalinc.github.io/CompressAI/datasets.html#imagefolder).
+
+Pre-trained NTC models for HED sketches can be found [here](https://upenn.box.com/shared/static/g1fzf9ctn0qvdn9exjpp8mkqh7aja4gm). The HED sketches generated from CLIC2021 can be found [here](https://upenn.box.com/shared/static/b90504o4k4onkicm8aal8fxkhltp2rnb).
 
 ## Dependencies
 * pytorch
