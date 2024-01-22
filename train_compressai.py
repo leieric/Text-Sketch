@@ -292,8 +292,6 @@ def main(argv):
     # net = image_models[args.model](quality=3)
     args_ntc = argparse.Namespace()
     args_ntc.model_name = 'Cheng2020AttentionFull'
-    # args_ntc.lmbda = args.lam_sketch
-    # args_ntc.dist_name_model = "ms_ssim"
     args_ntc.orig_channels = 1 # since HED sketches are grayscale
     net = models_compressai.get_models(args_ntc)
     net = net.to(device)
@@ -335,25 +333,13 @@ def main(argv):
         best_loss = min(loss, best_loss)
 
         if args.save:
-            save_dir = f"trained_compressai/"
+            save_dir = f"models_ntc/"
             os.makedirs(save_dir, exist_ok=True)
             save_checkpoint(
                 net.state_dict(),
                 is_best,
                 filename=f"{save_dir}/{args_ntc.model_name}_CLIC_HED_{args.dist_metric}_lmbda{args.lmbda}.pt"
             )
-            # save_checkpoint(
-            #     {
-            #         "epoch": epoch,
-            #         "state_dict": net.state_dict(),
-            #         "loss": loss,
-            #         "optimizer": optimizer.state_dict(),
-            #         "aux_optimizer": aux_optimizer.state_dict(),
-            #         "lr_scheduler": lr_scheduler.state_dict(),
-            #     },
-            #     is_best,
-            #     filename=f"lmbda{args.lmbda}"
-            # )
 
 
 if __name__ == "__main__":

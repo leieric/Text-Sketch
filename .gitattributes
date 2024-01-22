@@ -1,2 +1,0 @@
-models_ntc/OneShot_Cheng2020AttentionFull_CLIC_HED_ms_ssim_lmbda0.5.pt filter=lfs diff=lfs merge=lfs -text
-models_ntc/OneShot_Cheng2020AttentionFull_CLIC_HED_ms_ssim_lmbda1.0.pt filter=lfs diff=lfs merge=lfs -text

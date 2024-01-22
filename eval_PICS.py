@@ -199,7 +199,7 @@ if __name__ == '__main__':
     args_ntc.dist_name_model = "ms_ssim"
     args_ntc.orig_channels = 1
     ntc_sketch = models_compressai.get_models(args_ntc)
-    saved = torch.load(f'./models_ntc/OneShot_{args_ntc.model_name}_CLIC_HED_{args_ntc.dist_name_model}_lmbda{args_ntc.lmbda}.pt')
+    saved = torch.load(f'./models_ntc/{args_ntc.model_name}_CLIC_HED_{args_ntc.dist_name_model}_lmbda{args_ntc.lmbda}.pt')
     ntc_sketch.load_state_dict(saved)
     ntc_sketch.eval()
     ntc_sketch.update()
