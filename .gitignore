@@ -3,7 +3,7 @@
 recon_examples/
 recon_examples_saved/
 deprecated/
-scripts/
+# scripts/
 
 training/
 lightning_logs/
