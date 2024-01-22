@@ -7,7 +7,7 @@ The following scripts will loop through a dataset, and then output the results (
 * eval_PIC.py: uses prompt inversion to transmit a prompt and generate reconstructions.
 * eval_PICS.py: uses prompt inversion + sketch to transmit a compressed sketch and prompt.
 
-For example, `python eval_PICS.py --data_root DATA_ROOT` will run PICS, where the images are contained in the DATA_ROOT folder. 
+For example, `python eval_PICS.py --data_root DATA_ROOT` will run PICS, where the images are contained in the DATA_ROOT folder. See `scripts/PICS.sh` for example usage. Prior to running this script, you will need to either (a) train the NTC sketch model or (b) download the pre-trained ones into the `models_ntc/` folder. Instructions for both can be found below.
 
 The `annotator` directory is taken from the [ControlNet repo](https://github.com/lllyasviel/ControlNet.git), and the `prompt_inversion` directory is based off of the [Hard Prompts Made Easy repo](https://github.com/YuxinWenRick/hard-prompts-made-easy/tree/main).
 
