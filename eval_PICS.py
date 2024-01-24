@@ -74,7 +74,7 @@ def encode_rcc(model, clip, preprocess, ntc_sketch, im, N=5):
     apply_hed = HEDdetector()
     hed_map = HWC3(apply_hed(im))
     sketch = Image.fromarray(hed_map)
-    sketch = ntc_preprocess(sketch).unsqueeze(0)
+    sketch = (sketch).unsqueeze(0)
     
     # compress sketch using NTC encoder
     # reconstruct sketch using NTC encoder to generate candidate images in RCC
