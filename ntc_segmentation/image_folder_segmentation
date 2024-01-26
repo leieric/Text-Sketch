@@ -1,0 +1,25 @@
+# Copyright (c) 2021-2022, InterDigital Communications, Inc
+# All rights reserved.
+
+from compressai.datasets import ImageFolder
+
+from PIL import Image
+
+
+class ImageFolderSeg(ImageFolder):
+    """Subclass of ImageFolder where images are NOT converted to RGB
+    when loaded.
+    """
+    
+    def __getitem__(self, index):
+        """
+        Args:
+            index (int): Index
+
+        Returns:
+            img: `PIL.Image.Image` or transformed `PIL.Image.Image`.
+        """
+        img = Image.open(self.samples[index])
+        if self.transform:
+            return self.transform(img)
+        return img

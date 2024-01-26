@@ -16,7 +16,13 @@ For the save directory:
             - sketch_type_0.png
             - sketch_type_1.png
 
-For more info on input data_root structure, see dataloaders.py'''
+For more info on input data_root structure, see dataloaders.py.
+
+Note: For segmentation maps, pixels assume an integer value in the range
+[0, 149] based on semantic class membership. We store the maps
+as greyscale images [0, 255] to simply the loading and training process,
+so many of the png files will look like fully black images, but they
+actually store the correct pixel values.'''
 
 # import libraries
 from annotator.hed import HEDdetector
@@ -63,8 +69,10 @@ def main():
     # sketch generator function
     if args.sketch_type == 'segmentation':
         apply = UniformerDetector()
+        mode = 'L'
     elif args.sketch_type == 'hed':
         apply = HEDdetector()
+        mode = 'RGB'
     else:
         sys.exit("Not a valid sketch type. Choose 'segmentation' or 'hed'.")
 
@@ -74,7 +82,7 @@ def main():
         x_img = (255*x.permute(1,2,0)).numpy().astype(np.uint8)
         img = resize_image(HWC3(x_img), 512)
         sketch = apply(img)
-        sketch_img = Image.fromarray(sketch)
+        sketch_img = Image.fromarray(sketch, mode=mode)
         sketch_img.save(os.path.join(save_path, f'{args.sketch_type}_{i}.png'))
     return
 
