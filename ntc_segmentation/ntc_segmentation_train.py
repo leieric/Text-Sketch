@@ -48,12 +48,50 @@ from PIL import Image
 from ..train_compressai import (
     configure_optimizers, 
     train_one_epoch, 
-    test_epoch, 
     save_checkpoint,
-    CustomDataParallel
+    CustomDataParallel,
+    AverageMeter
 )
 
 from ntc_segmentation_model import Cheng2020AttentionSeg
+
+def test_epoch(epoch, test_dataloader, model, criterion, args):
+    model.eval()
+    device = next(model.parameters()).device
+
+    loss = AverageMeter()
+    bpp_loss = AverageMeter()
+    dist_metric_loss = AverageMeter()
+    aux_loss = AverageMeter()
+    accuracy =  AverageMeter()
+
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for d in test_dataloader:
+            d = d.to(device)
+            out_net = model(d)
+            out_criterion = criterion(out_net, d)
+            _, predicted_map = torch.max(out_net["xhat"], 1)
+            total += torch.numel(d)
+            correct += (predicted_map == d).sum().item()
+            acc = 100 * correct // total
+
+            aux_loss.update(model.aux_loss())
+            bpp_loss.update(out_criterion["bpp_loss"])
+            loss.update(out_criterion["loss"])
+            dist_metric_loss.update(out_criterion[f"{args.dist_metric}_loss"])
+            accuracy.update(acc)
+
+    print(
+        f"Test epoch {epoch}: Accuracy: {accuracy.avg}, Average losses:"
+        f"\tLoss: {loss.avg:.4f} |"
+        f"\tDistort loss: {dist_metric_loss.avg:.4f} |"
+        f"\tBpp loss: {bpp_loss.avg:.4f} |"
+        f"\tAux loss: {aux_loss.avg:.4f}\n"
+    )
+
+    return loss.avg
 
 
 def parse_args(argv):
