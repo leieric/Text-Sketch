@@ -27,7 +27,7 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from ..models_compressai import Cheng2020AttentionCustom
+from models_compressai import Cheng2020AttentionCustom
 
 from compressai.layers import (
     AttentionBlock,

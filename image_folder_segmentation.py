@@ -27,51 +27,35 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import math
+from compressai.datasets import ImageFolder
 
+from PIL import Image
 import torch
-import torch.nn as nn
-
-from compressai.registry import register_criterion
-from compressai.losses import RateDistortionLoss
 
 
-@register_criterion("RateDistortionLoss")
-class RateDistortionLossSeg(RateDistortionLoss):
-    """Custom rate distortion loss with a Lagrangian parameter.
-    Implemented pixel-wise cross-entropy as a loss metric to support
-    semantic segmentation maps as inputs."""
+class ImageFolderSeg(ImageFolder):
+    """Subclass of ImageFolder where images are NOT converted to RGB
+    when loaded.
 
-    def __init__(self, lmbda=0.01, metric="cross-entropy", return_type="all"):
-        super().__init__()
-        if metric == "cross-entropy":
-            self.metric = nn.CrossEntropyLoss()
-        elif metric == "mse":
-            self.metric = nn.MSELoss()
-        else:
-            raise NotImplementedError(f"{metric} is not implemented!")
-        self.lmbda = lmbda
-        self.return_type = return_type
+    Args:
+        root (string): root directory of the dataset
+        transform (callable, optional): a function or transform that takes in a
+            PIL image and returns a transformed version
+        split (string): split mode ('train' or 'val') 
+    """
+    
+    def __init__(self, root, transform=None, split="train"):
+        super().__init__(root=root, transform=transform, split=split)
+    
+    def __getitem__(self, index):
+        """
+        Args:
+            index (int): Index
 
-    def forward(self, output, target):
-        N, _, H, W = target.size()
-        out = {}
-        num_pixels = N * H * W
-
-        out["bpp_loss"] = sum(
-            (torch.log(likelihoods).sum() / (-math.log(2) * num_pixels))
-            for likelihoods in output["likelihoods"].values()
-        )
-        if self.metric == nn.MSELoss():
-            out["mse_loss"] = self.metric(output["x_hat"], target)
-            distortion = 255**2 * out["mse_loss"]
-        else:
-            out["cross_entropy_loss"] = self.metric(output["x_hat"], target)
-            distortion = out["cross_entropy_loss"]
-
-
-        out["loss"] = self.lmbda * distortion + out["bpp_loss"]
-        if self.return_type == "all":
-            return out
-        else:
-            return out[self.return_type]
+        Returns:
+            img: `PIL.Image.Image` or transformed `PIL.Image.Image`.
+        """
+        img = Image.open(self.samples[index])
+        if self.transform:
+            return self.transform(img)
+        return img

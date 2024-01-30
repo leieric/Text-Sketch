@@ -94,13 +94,14 @@ def train_one_epoch(
     device = next(model.parameters()).device
 
     for i, d in enumerate(train_dataloader):
+        
         d = d.to(device)
 
         optimizer.zero_grad()
         aux_optimizer.zero_grad()
 
         out_net = model(d)
-
+        
         out_criterion = criterion(out_net, d)
         out_criterion["loss"].backward()
         if clip_max_norm > 0:
@@ -112,15 +113,15 @@ def train_one_epoch(
         aux_optimizer.step()
 
         # if i % (len(train_dataloader) // 4) == 0:
-        #     print(
-        #         f"Train epoch {epoch}: ["
-        #         f"{i*len(d)}/{len(train_dataloader.dataset)}"
-        #         f" ({100. * i / len(train_dataloader):.0f}%)]"
-        #         f'\tLoss: {out_criterion["loss"].item():.3f} |'
-        #         f'\tMS-SSIM loss: {out_criterion["ms_ssim_loss"].item():.3f} |'
-        #         f'\tBpp loss: {out_criterion["bpp_loss"].item():.2f} |'
-        #         f"\tAux loss: {aux_loss.item():.2f}"
-        #     )
+        print(
+            f"Train epoch {epoch}: ["
+            f"{i*len(d)}/{len(train_dataloader.dataset)}"
+            f" ({100. * i / len(train_dataloader):.0f}%)]"
+            f'\tLoss: {out_criterion["loss"].item():.3f} |'
+            f'\tCross-Entropy loss: {out_criterion["cross_entropy_loss"].item():.3f} |'
+            f'\tBpp loss: {out_criterion["bpp_loss"].item():.2f} |'
+            f"\tAux loss: {aux_loss.item():.2f}"
+        )
 
 
 def test_epoch(epoch, test_dataloader, model, criterion, args):

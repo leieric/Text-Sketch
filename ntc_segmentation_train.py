@@ -45,7 +45,7 @@ from compressai.optimizers import net_aux_optimizer
 from compressai.zoo import image_models
 from PIL import Image
 
-from ..train_compressai import (
+from train_compressai import (
     configure_optimizers, 
     train_one_epoch, 
     save_checkpoint,
@@ -72,7 +72,7 @@ def test_epoch(epoch, test_dataloader, model, criterion, args):
             d = d.to(device)
             out_net = model(d)
             out_criterion = criterion(out_net, d)
-            _, predicted_map = torch.max(out_net["xhat"], 1)
+            _, predicted_map = torch.max(out_net["x_hat"], 1)
             total += torch.numel(d)
             correct += (predicted_map == d).sum().item()
             acc = 100 * correct // total
@@ -167,11 +167,11 @@ def parse_args(argv):
     return args
 
 def main(argv):
-    args = parse_args
+    args = parse_args(argv)
 
     # set dist_metric equal to cross entropy loss for segmentation
     # TODO: implement other pixel-wise segmentation losses, such as dice loss
-    args.dist_metric = 'cross-entropy'
+    args.dist_metric = 'cross_entropy'
 
     if args.seed is not None:
         torch.manual_seed(args.seed)
@@ -180,14 +180,16 @@ def main(argv):
     train_transforms = transforms.Compose(
         [
             transforms.RandomCrop(args.patch_size),
-            transforms.PILToTensor()
+            transforms.PILToTensor(),
+            transforms.ConvertImageDtype(torch.float32)
         ]
     )
 
     test_transforms = transforms.Compose(
         [
             transforms.RandomCrop(args.patch_size),
-            transforms.PILToTensor()
+            transforms.PILToTensor(),
+            transforms.ConvertImageDtype(torch.float32)
         ]
     )
 
