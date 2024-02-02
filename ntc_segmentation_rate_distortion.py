@@ -68,7 +68,7 @@ class RateDistortionLossSeg(RateDistortionLoss):
         else:
             # cross entropy requires target to be 3-dimensional and type Long
             # squeeze the target on the channel dimension such that
-            # torch.shape is transformed: (batch_size,1,H,W) -> (batch_size,H,W)
+            # target.size() is transformed: (batch_size,1,H,W) -> (batch_size,H,W)
             target = torch.squeeze(target, dim=1)
             target = target.type(dtype=torch.long)
             out["cross_entropy_loss"] = self.metric(output["x_hat"], target)

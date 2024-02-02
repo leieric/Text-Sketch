@@ -63,7 +63,6 @@ def test_epoch(epoch, test_dataloader, model, criterion, args):
     bpp_loss = AverageMeter()
     dist_metric_loss = AverageMeter()
     aux_loss = AverageMeter()
-    accuracy =  AverageMeter()
 
     correct = 0
     total = 0
@@ -72,19 +71,18 @@ def test_epoch(epoch, test_dataloader, model, criterion, args):
             d = d.to(device)
             out_net = model(d)
             out_criterion = criterion(out_net, d)
-            _, predicted_map = torch.max(out_net["x_hat"], 1)
+            _, predicted_map = torch.max(out_net["x_hat"], dim=1, keepdim=False)
             total += torch.numel(d)
-            correct += (predicted_map == d).sum().item()
-            acc = 100 * correct // total
+            correct += (predicted_map == torch.squeeze(d, dim=1)).sum().item()
 
             aux_loss.update(model.aux_loss())
             bpp_loss.update(out_criterion["bpp_loss"])
             loss.update(out_criterion["loss"])
             dist_metric_loss.update(out_criterion[f"{args.dist_metric}_loss"])
-            accuracy.update(acc)
-
+    
+    accuracy = 100 * correct / total
     print(
-        f"Test epoch {epoch}: Accuracy: {accuracy.avg}, Average losses:"
+        f"\nTest epoch {epoch}: | Accuracy: {accuracy:.2f} | Average losses:"
         f"\tLoss: {loss.avg:.4f} |"
         f"\tDistort loss: {dist_metric_loss.avg:.4f} |"
         f"\tBpp loss: {bpp_loss.avg:.4f} |"
@@ -215,6 +213,7 @@ def main(argv):
     )
     # N=192 for Cheng2020, orig_channels=1 for grayscale, num_class=150 for ADE20k
     net = Cheng2020AttentionSeg(N=192, orig_channels=1, num_class=150)
+    net = net.to(device) # 
 
     if args.cuda and args.use_data_parallel and torch.cuda.device_count() > 1:
         net = CustomDataParallel(net)
@@ -236,6 +235,7 @@ def main(argv):
     best_loss = float("inf")
     for epoch in range(last_epoch, args.epochs):
         print(f"Learning rate: {optimizer.param_groups[0]['lr']}")
+        print(f"Lambda: {args.lmbda}")
         train_one_epoch(
             net,
             criterion,

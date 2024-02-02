@@ -92,6 +92,7 @@ def train_one_epoch(
 ):
     model.train()
     device = next(model.parameters()).device
+    # print(device)
 
     for i, d in enumerate(train_dataloader):
         
@@ -112,16 +113,16 @@ def train_one_epoch(
         aux_loss.backward()
         aux_optimizer.step()
 
-        # if i % (len(train_dataloader) // 4) == 0:
-        print(
-            f"Train epoch {epoch}: ["
-            f"{i*len(d)}/{len(train_dataloader.dataset)}"
-            f" ({100. * i / len(train_dataloader):.0f}%)]"
-            f'\tLoss: {out_criterion["loss"].item():.3f} |'
-            f'\tCross-Entropy loss: {out_criterion["cross_entropy_loss"].item():.3f} |'
-            f'\tBpp loss: {out_criterion["bpp_loss"].item():.2f} |'
-            f"\tAux loss: {aux_loss.item():.2f}"
-        )
+        if i % (len(train_dataloader) // 4) == 0:
+            print(
+                f"Train epoch {epoch}: ["
+                f"{i*len(d)}/{len(train_dataloader.dataset)}"
+                f" ({100. * i / len(train_dataloader):.0f}%)]"
+                f'\tLoss: {out_criterion["loss"].item():.3f} |'
+                f'\tCross-Entropy loss: {out_criterion["cross_entropy_loss"].item():.3f} |'
+                f'\tBpp loss: {out_criterion["bpp_loss"].item():.2f} |'
+                f"\tAux loss: {aux_loss.item():.2f}"
+            )
 
 
 def test_epoch(epoch, test_dataloader, model, criterion, args):
