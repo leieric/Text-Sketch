@@ -72,7 +72,7 @@ def main():
         mode = 'L'
     elif args.sketch_type == 'hed':
         apply = HEDdetector()
-        mode = 'RGB'
+        mode = 'L'
     else:
         sys.exit("Not a valid sketch type. Choose 'segmentation' or 'hed'.")
 

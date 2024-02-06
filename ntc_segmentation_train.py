@@ -46,14 +46,49 @@ from compressai.zoo import image_models
 from PIL import Image
 
 from train_compressai import (
-    configure_optimizers, 
-    train_one_epoch, 
+    configure_optimizers,  
     save_checkpoint,
     CustomDataParallel,
     AverageMeter
 )
 
 from ntc_segmentation_model import Cheng2020AttentionSeg
+
+def train_one_epoch(
+    model, criterion, train_dataloader, optimizer, aux_optimizer, epoch, clip_max_norm
+):
+    model.train()
+    device = next(model.parameters()).device
+
+    for i, d in enumerate(train_dataloader):
+        
+        d = d.to(device)
+
+        optimizer.zero_grad()
+        aux_optimizer.zero_grad()
+
+        out_net = model(d)
+        
+        out_criterion = criterion(out_net, d)
+        out_criterion["loss"].backward()
+        if clip_max_norm > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), clip_max_norm)
+        optimizer.step()
+
+        aux_loss = model.aux_loss()
+        aux_loss.backward()
+        aux_optimizer.step()
+
+        if i % (len(train_dataloader) // 4) == 0:
+            print(
+                f"Train epoch {epoch}: ["
+                f"{i*len(d)}/{len(train_dataloader.dataset)}"
+                f" ({100. * i / len(train_dataloader):.0f}%)]"
+                f'\tLoss: {out_criterion["loss"].item():.3f} |'
+                f'\tCross-Entropy loss: {out_criterion["cross_entropy_loss"].item():.3f} |'
+                f'\tBpp loss: {out_criterion["bpp_loss"].item():.2f} |'
+                f"\tAux loss: {aux_loss.item():.2f}"
+            )
 
 def test_epoch(epoch, test_dataloader, model, criterion, args):
     model.eval()
@@ -213,7 +248,7 @@ def main(argv):
     )
     # N=192 for Cheng2020, orig_channels=1 for grayscale, num_class=150 for ADE20k
     net = Cheng2020AttentionSeg(N=192, orig_channels=1, num_class=150)
-    net = net.to(device) # 
+    net = net.to(device)
 
     if args.cuda and args.use_data_parallel and torch.cuda.device_count() > 1:
         net = CustomDataParallel(net)
