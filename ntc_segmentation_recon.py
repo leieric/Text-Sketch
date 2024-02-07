@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 import numpy as np
 from annotator.util import HWC3, resize_image
 from PIL import Image
-from torchvision.transforms.functional import to_pil_image, adjust_sharpness
+from torchvision.transforms.functional import to_pil_image, adjust_sharpness, pil_to_tensor
 
 
 def main():
@@ -23,6 +23,8 @@ def main():
     args = Namespace()
     args.patch_size = (256, 256)
     args.dataset = '/home/noah/data/CLIC/2021/segmentation'
+    args.batch_size = 1
+    args.num_workers = 2
 
     train_transforms = transforms.Compose(
             [
@@ -50,24 +52,23 @@ def main():
             shuffle=True,
         )
 
-    for i, x in train_dataloader:
-        x = x[0]
-        x_im = (255*x.permute(1,2,0)).numpy().astype(np.uint8)
-        im = resize_image(HWC3(x_im), 512)
-
+    for i, x in enumerate(train_dataloader):
+        im = x[0, :, :, :]
         # Save ground-truth image
-        im_orig = Image.fromarray(im)
+        im_orig = to_pil_image(im, mode='L')
         im_orig.save(f'/home/noah/data/example_reconstructions/original/{i}.png')
 
         # compress and decompress image
         with torch.no_grad():
-            sketch_dict = ntc_model.compress(im)
+            sketch_dict = ntc_model.compress(x)
             sketch_recon = ntc_model.decompress(sketch_dict['strings'], sketch_dict['shape'])['x_hat'][0]
-            sketch_recon = adjust_sharpness(sketch_recon, 2)
-            sketch_recon = HWC3((255*sketch_recon.permute(1,2,0)).numpy().astype(np.uint8))
+            _, sketch_recon = torch.max(sketch_recon, dim=0, keepdim=True)
+            print(sketch_recon)
+            # sketch_recon = adjust_sharpness(sketch_recon, 2)
+            # sketch_recon = HWC3((255*sketch_recon.permute(1,2,0)).numpy().astype(np.uint8))
         
         # save reconstructed image
-        sketch_recon = Image.fromarray(sketch_recon)
+        sketch_recon = Image.fromarray((255*sketch_recon[0]).numpy().astype(np.uint8).transpose(1, 2, 0))
         sketch_recon.save(f'/home/noah/data/example_reconstructions/reconstructed/{i}.png')
 
     return
