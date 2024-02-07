@@ -55,7 +55,7 @@ class ImageFolderSeg(ImageFolder):
         Returns:
             img: `PIL.Image.Image` or transformed `PIL.Image.Image`.
         """
-        img = Image.open(self.samples[index])
+        img = Image.open(self.samples[index]).convert('RGB')
         if self.transform:
             return self.transform(img)
         return img

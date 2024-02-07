@@ -77,11 +77,14 @@ def main():
         sys.exit("Not a valid sketch type. Choose 'segmentation' or 'hed'.")
 
     # iterate through data and generate/save sketches
-    for i, x in tqdm.tqdm(enumerate(data)):
+    print('Test Set Segmentation Generation:')
+    for i, x in enumerate(data):
+        print(f"Image {i}")
         x = x[0]
         x_img = (255*x.permute(1,2,0)).numpy().astype(np.uint8)
         img = resize_image(HWC3(x_img), 512)
         sketch = apply(img)
+        print(f"\tClasses: {np.unique(sketch)}\n")
         sketch_img = Image.fromarray(sketch, mode=mode)
         sketch_img.save(os.path.join(save_path, f'{args.sketch_type}_{i}.png'))
     return
