@@ -34,7 +34,9 @@ from argparse import ArgumentParser
 import tqdm
 import numpy as np
 import sys
+import torch
 import os
+from torchvision.transforms.functional import to_pil_image, pil_to_tensor
 
 
 def main():
@@ -50,21 +52,20 @@ def main():
 
     # set save path
     # example: '/home/eric/data/CLIC/2021/segmentation/train/'
-    save_path = os.path.join(args.save_dir, args.sketch_type, args.split)
 
     # load data
-    dm = dataloaders.get_dataloader(args)
+    # dm = dataloaders.get_dataloader(args)
 
-    # data split
-    if args.split == 'train':
-        data = dm.train_dset
-    elif args.split == 'test':
-        data = dm.test_dset
-    elif args.split == 'val' or args.split == 'valid':
-        data = dm.val_dset
-        args.split = 'valid'
-    else:
-        sys.exit('Not a valid split.')
+    # # data split
+    # if args.split == 'train':
+    #     data = dm.train_dset
+    # elif args.split == 'test':
+    #     data = dm.test_dset
+    # elif args.split == 'val' or args.split == 'valid':
+    #     data = dm.val_dset
+    #     args.split = 'valid'
+    # else:
+    #     sys.exit('Not a valid split.')
 
     # sketch generator function
     if args.sketch_type == 'segmentation':
@@ -77,16 +78,23 @@ def main():
         sys.exit("Not a valid sketch type. Choose 'segmentation' or 'hed'.")
 
     # iterate through data and generate/save sketches
-    print('Test Set Segmentation Generation:')
-    for i, x in enumerate(data):
-        print(f"Image {i}")
-        x = x[0]
-        x_img = (255*x.permute(1,2,0)).numpy().astype(np.uint8)
+    data_dir = os.fsencode(args.data_root)
+    for i, file in enumerate(os.listdir(data_dir)):
+        filename = os.fsdecode(file)
+        if not filename.endswith(".png"):
+            continue
+        print(f"Image: {filename}")
+       
+        x = Image.open(os.path.join(args.data_root, filename))
+        x = pil_to_tensor(x)
+        x_img = (x.permute(1,2,0)).numpy().astype(np.uint8)
         img = resize_image(HWC3(x_img), 512)
         sketch = apply(img)
         print(f"\tClasses: {np.unique(sketch)}\n")
-        sketch_img = Image.fromarray(sketch, mode=mode)
-        sketch_img.save(os.path.join(save_path, f'{args.sketch_type}_{i}.png'))
+        print(type(sketch))
+        torch.save(torch.from_numpy(sketch), os.path.join(args.save_dir, f'{filename[:-4]}_{args.sketch_type}.pt'))
+        # sketch_img = Image.fromarray(sketch, mode=mode)
+        # sketch_img.save(os.path.join(args.save_dir, f'{filename[:-4]}_{args.sketch_type}.png'))
     return
 
 

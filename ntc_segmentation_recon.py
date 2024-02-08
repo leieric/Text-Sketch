@@ -66,24 +66,23 @@ def main():
     #         shuffle=False,
     #     )
 
-    # for i, x in enumerate(test_dataloader):
-    i = 2
-    x = Image.open(f'/home/noah/data/CLIC/2021/segmentation/test/segmentation_{i}.png')
-    x = pil_to_tensor(x)
-    # print(f"Image {i}")
-    im = x.squeeze()
-    print(im.shape)
-    # im *= 255
-    print(f"\tClasses: {np.unique(im)}")
-    # convert saved grayscale segmentation map to palette RGB
     palette = get_palette('ade')
-    # print(len(palette))
-    color_seg = np.zeros((im.shape[0], im.shape[1], 3), dtype=np.uint8)
-    for label, color in enumerate(palette):
-        color_seg[im == label, :] = color
-    color_seg = color_seg[..., ::-1]
-    color_seg = Image.fromarray(color_seg)
-    color_seg.save(f'/home/noah/data/example_reconstructions/original/{i}.png')
+    
+    data_root = '/home/noah/data/CLIC/2021/segmentation/test'
+    data_dir = os.fsencode(data_root)
+    
+    for file in os.listdir(data_dir):
+        filename = os.fsdecode(file)
+        if not filename.endswith(".pt"):
+            continue
+        print(f"File: {filename}")
+        x = torch.load(os.path.join(data_root, filename))
+        color_seg = np.zeros((x.shape[0], x.shape[1], 3), dtype=np.uint8)
+        for label, color in enumerate(palette):
+            color_seg[x == label, :] = color
+        color_seg = color_seg[..., ::-1]
+        color_seg = Image.fromarray(color_seg)
+        color_seg.save(f'/home/noah/data/example_reconstructions/original/{filename}_segmentation.png')
 
     # compress and decompress image
     # with torch.no_grad():
