@@ -82,7 +82,7 @@ def main():
             color_seg[x == label, :] = color
         color_seg = color_seg[..., ::-1]
         color_seg = Image.fromarray(color_seg)
-        color_seg.save(f'/home/noah/data/example_reconstructions/original/{filename}_segmentation.png')
+        color_seg.save(f'/home/noah/data/example_reconstructions/original/{filename[:-3]}.png')
 
     # compress and decompress image
     # with torch.no_grad():

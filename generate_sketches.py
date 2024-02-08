@@ -46,26 +46,26 @@ def main():
                         help='Supported sketch types: segmentation, hed.')
     parser.add_argument('--dataset', default='CLIC2021', type=str)
     parser.add_argument('--split', default='train', type=str)
-    parser.add_argument('--data_root', default='/home/eric/data/', type=str)
-    parser.add_argument('--save_dir', default='/home/eric/data/CLIC/2021/', type=str)
+    parser.add_argument('--data_root', default='/home/noah/data/', type=str)
+    parser.add_argument('--save_dir', default='/home/noah/data/CLIC/2021/', type=str)
     args = parser.parse_args()
 
-    # set save path
-    # example: '/home/eric/data/CLIC/2021/segmentation/train/'
+    # save dir
+    save_dir = os.path.join(args.save_dir, args.sketch_type, args.split)
 
     # load data
-    # dm = dataloaders.get_dataloader(args)
+    dm = dataloaders.get_dataloader(args)
 
-    # # data split
-    # if args.split == 'train':
-    #     data = dm.train_dset
-    # elif args.split == 'test':
-    #     data = dm.test_dset
-    # elif args.split == 'val' or args.split == 'valid':
-    #     data = dm.val_dset
-    #     args.split = 'valid'
-    # else:
-    #     sys.exit('Not a valid split.')
+    # data split
+    if args.split == 'train':
+        data = dm.train_dset
+    elif args.split == 'test':
+        data = dm.test_dset
+    elif args.split == 'val' or args.split == 'valid':
+        data = dm.val_dset
+        args.split = 'valid'
+    else:
+        sys.exit('Not a valid split.')
 
     # sketch generator function
     if args.sketch_type == 'segmentation':
@@ -77,24 +77,13 @@ def main():
     else:
         sys.exit("Not a valid sketch type. Choose 'segmentation' or 'hed'.")
 
-    # iterate through data and generate/save sketches
-    data_dir = os.fsencode(args.data_root)
-    for i, file in enumerate(os.listdir(data_dir)):
-        filename = os.fsdecode(file)
-        if not filename.endswith(".png"):
-            continue
-        print(f"Image: {filename}")
-       
-        x = Image.open(os.path.join(args.data_root, filename))
-        x = pil_to_tensor(x)
-        x_img = (x.permute(1,2,0)).numpy().astype(np.uint8)
+    for i, x in enumerate(data):  
+        x = x[0]
+        x_img = (255*x.permute(1,2,0)).numpy().astype(np.uint8)
         img = resize_image(HWC3(x_img), 512)
         sketch = apply(img)
-        print(f"\tClasses: {np.unique(sketch)}\n")
-        print(type(sketch))
-        torch.save(torch.from_numpy(sketch), os.path.join(args.save_dir, f'{filename[:-4]}_{args.sketch_type}.pt'))
-        # sketch_img = Image.fromarray(sketch, mode=mode)
-        # sketch_img.save(os.path.join(args.save_dir, f'{filename[:-4]}_{args.sketch_type}.png'))
+        torch.save(torch.from_numpy(sketch), os.path.join(save_dir, f'{args.sketch_type}_{i}.pt'))
+
     return
 
 
