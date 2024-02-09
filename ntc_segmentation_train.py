@@ -118,7 +118,8 @@ def test_epoch(epoch, test_dataloader, model, criterion, args):
 
             if save_im:
                 
-                im_dir = os.path.join(args.dataset, f'{args.dist_metric}_lmbda{args.lmbda}', f'epoch_{epoch}')
+                im_dir = os.path.join(args.dataset, 'ntc_segmentation_example_reconstructions', 
+                                      f'{args.dist_metric}_lmbda{args.lmbda}', f'epoch_{epoch}')
                 os.makedirs(im_dir, exist_ok=True)
                 
                 for j in range(d.shape[0]):
