@@ -16,6 +16,15 @@ from annotator.uniformer.mmseg.core.evaluation import get_palette
 from annotator.util import annotator_ckpts_path
 
 
+def segmap_gray2rgb(x: torch.Tensor, palette_key='ade') -> Image.Image:
+    palette = get_palette(palette_key)
+    color_seg = np.zeros((x.shape[0], x.shape[1], 3), dtype=np.uint8)
+    for label, color in enumerate(palette):
+        color_seg[x == label, :] = color
+    color_seg = color_seg[..., ::-1]
+    return Image.fromarray(color_seg)
+
+
 def main():
 
     # seg_modelpath = os.path.join(annotator_ckpts_path, "upernet_global_small.pth")

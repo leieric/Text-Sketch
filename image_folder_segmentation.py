@@ -29,18 +29,16 @@
 
 from compressai.datasets import ImageFolder
 
-from PIL import Image
 import torch
 
 
 class ImageFolderSeg(ImageFolder):
-    """Subclass of ImageFolder where images are NOT converted to RGB
-    when loaded.
+    """Subclass of ImageFolder where segmentation maps are loaded as torch objects.
 
     Args:
         root (string): root directory of the dataset
         transform (callable, optional): a function or transform that takes in a
-            PIL image and returns a transformed version
+            torch object and returns a transformed version
         split (string): split mode ('train' or 'val') 
     """
     
@@ -55,7 +53,7 @@ class ImageFolderSeg(ImageFolder):
         Returns:
             img: `PIL.Image.Image` or transformed `PIL.Image.Image`.
         """
-        img = Image.open(self.samples[index]).convert('RGB')
+        img = torch.load(self.samples[index])
         if self.transform:
             return self.transform(img)
         return img

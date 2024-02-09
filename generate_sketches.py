@@ -20,9 +20,9 @@ For more info on input data_root structure, see dataloaders.py.
 
 Note: For segmentation maps, pixels assume an integer value in the range
 [0, 149] based on semantic class membership. We store the maps
-as greyscale images [0, 255] to simply the loading and training process,
-so many of the png files will look like fully black images, but they
-actually store the correct pixel values.'''
+as greyscale images [0, 255] to simplify the loading and training process,
+so when converted to images many of the maps will look like fully black images, 
+but they actually store the correct pixel values.'''
 
 # import libraries
 from annotator.hed import HEDdetector
@@ -31,12 +31,10 @@ from annotator.util import HWC3, resize_image
 from PIL import Image
 import dataloaders
 from argparse import ArgumentParser
-import tqdm
 import numpy as np
 import sys
 import torch
 import os
-from torchvision.transforms.functional import to_pil_image, pil_to_tensor
 
 
 def main():
@@ -82,7 +80,8 @@ def main():
         x_img = (255*x.permute(1,2,0)).numpy().astype(np.uint8)
         img = resize_image(HWC3(x_img), 512)
         sketch = apply(img)
-        torch.save(torch.from_numpy(sketch), os.path.join(save_dir, f'{args.sketch_type}_{i}.pt'))
+        sketch = torch.from_numpy(sketch).unsqueeze(0)
+        torch.save(sketch, os.path.join(save_dir, f'{args.sketch_type}_{i}.pt'))
 
     return
 

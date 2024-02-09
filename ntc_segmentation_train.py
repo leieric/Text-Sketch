@@ -33,26 +33,18 @@ import sys
 import os
 
 import torch
-import torch.nn as nn
 import torch.optim as optim
 
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
+from train_compressai import configure_optimizers, save_checkpoint, CustomDataParallel, AverageMeter
+
 from image_folder_segmentation import ImageFolderSeg
 from ntc_segmentation_rate_distortion import RateDistortionLossSeg
-from compressai.optimizers import net_aux_optimizer
-from compressai.zoo import image_models
-from PIL import Image
-
-from train_compressai import (
-    configure_optimizers,  
-    save_checkpoint,
-    CustomDataParallel,
-    AverageMeter
-)
-
 from ntc_segmentation_model import Cheng2020AttentionSeg
+from ntc_segmentation_recon import segmap_gray2rgb
+
 
 def train_one_epoch(
     model, criterion, train_dataloader, optimizer, aux_optimizer, epoch, clip_max_norm
@@ -62,6 +54,7 @@ def train_one_epoch(
 
     for i, d in enumerate(train_dataloader):
         
+        d = d.type(dtype=torch.float32)
         d = d.to(device)
 
         optimizer.zero_grad()
@@ -84,10 +77,10 @@ def train_one_epoch(
                 f"Train epoch {epoch}: ["
                 f"{i*len(d)}/{len(train_dataloader.dataset)}"
                 f" ({100. * i / len(train_dataloader):.0f}%)]"
-                f'\tLoss: {out_criterion["loss"].item():.3f} |'
-                f'\tCross-Entropy loss: {out_criterion["cross_entropy_loss"].item():.3f} |'
-                f'\tBpp loss: {out_criterion["bpp_loss"].item():.2f} |'
-                f"\tAux loss: {aux_loss.item():.2f}"
+                f'\tLoss: {out_criterion["loss"].item():.8f} |'
+                f'\tCross-Entropy loss: {out_criterion["cross_entropy_loss"].item():.8f} |'
+                f'\tBpp loss: {out_criterion["bpp_loss"].item():.8f} |'
+                f"\tAux loss: {aux_loss.item():.8f}"
             )
 
 def test_epoch(epoch, test_dataloader, model, criterion, args):
@@ -99,33 +92,54 @@ def test_epoch(epoch, test_dataloader, model, criterion, args):
     dist_metric_loss = AverageMeter()
     aux_loss = AverageMeter()
 
+    # save reconstruction images every 30 epochs
+    save_im = False
+    if epoch % 30 == 0:
+        save_im = True
+
     correct = 0
     total = 0
     with torch.no_grad():
-        for d in test_dataloader:
+        for i, d in enumerate(test_dataloader):
+
+            d = d.type(dtype=torch.float32)
             d = d.to(device)
+
             out_net = model(d)
             out_criterion = criterion(out_net, d)
             _, predicted_map = torch.max(out_net["x_hat"], dim=1, keepdim=False)
+            
             total += torch.numel(d)
-            correct += (predicted_map == torch.squeeze(d, dim=1)).sum().item()
-
+            correct += (predicted_map == torch.squeeze(d)).sum().item()
             aux_loss.update(model.aux_loss())
             bpp_loss.update(out_criterion["bpp_loss"])
             loss.update(out_criterion["loss"])
             dist_metric_loss.update(out_criterion[f"{args.dist_metric}_loss"])
-    
+
+            if save_im:
+                
+                im_dir = os.path.join(args.dataset, f'{args.dist_metric}_lmbda{args.lmbda}', f'epoch_{epoch}')
+                os.makedirs(im_dir, exist_ok=True)
+                
+                for j in range(d.shape[0]):
+                    
+                    original_im = segmap_gray2rgb((d[j, 0, :, :]).cpu())
+                    original_im.save(os.path.join(im_dir, f'original_{j}.png'))
+
+                    recon_im = segmap_gray2rgb((predicted_map[j, :, :]).cpu())
+                    recon_im.save(os.path.join(im_dir, f'recon_{j}.png'))
+                
     accuracy = 100 * correct / total
+    
     print(
         f"\nTest epoch {epoch}: | Accuracy: {accuracy:.2f} | Average losses:"
-        f"\tLoss: {loss.avg:.4f} |"
-        f"\tDistort loss: {dist_metric_loss.avg:.4f} |"
-        f"\tBpp loss: {bpp_loss.avg:.4f} |"
-        f"\tAux loss: {aux_loss.avg:.4f}\n"
+        f"\tLoss: {loss.avg:.8f} |"
+        f"\tDistort loss: {dist_metric_loss.avg:.8f} |"
+        f"\tBpp loss: {bpp_loss.avg:.8f} |"
+        f"\tAux loss: {aux_loss.avg:.8f}\n"
     )
 
     return loss.avg
-
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Example training script.")
@@ -213,16 +227,12 @@ def main(argv):
     train_transforms = transforms.Compose(
         [
             transforms.RandomCrop(args.patch_size),
-            transforms.PILToTensor(),
-            transforms.ConvertImageDtype(torch.float32)
         ]
     )
 
     test_transforms = transforms.Compose(
         [
             transforms.RandomCrop(args.patch_size),
-            transforms.PILToTensor(),
-            transforms.ConvertImageDtype(torch.float32)
         ]
     )
 
@@ -287,12 +297,12 @@ def main(argv):
         best_loss = min(loss, best_loss)
 
         if args.save:
-            save_dir = "trained_ntc_segmentation_models"
+            save_dir = os.path.join(args.dataset, "trained_ntc_segmentation_models")
             os.makedirs(save_dir, exist_ok=True)
             save_checkpoint(
                 net.state_dict(),
                 is_best,
-                filename=os.path.join(save_dir, f"{args.dataset}_segmentation_{args.dist_metric}_lmbda{args.lmbda}.pt")
+                filename=os.path.join(save_dir, f"{args.dist_metric}_lmbda{args.lmbda}.pt")
             )
 
 
