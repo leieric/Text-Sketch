@@ -47,7 +47,7 @@ from ntc_segmentation_recon import segmap_gray2rgb
 
 
 def train_one_epoch(
-    model, criterion, train_dataloader, optimizer, aux_optimizer, epoch, clip_max_norm
+    model, criterion, train_dataloader, optimizer, aux_optimizer, epoch, args
 ):
     model.train()
     device = next(model.parameters()).device
@@ -64,8 +64,8 @@ def train_one_epoch(
         
         out_criterion = criterion(out_net, d)
         out_criterion["loss"].backward()
-        if clip_max_norm > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), clip_max_norm)
+        if args.clip_max_norm > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_max_norm)
         optimizer.step()
 
         aux_loss = model.aux_loss()
@@ -73,15 +73,21 @@ def train_one_epoch(
         aux_optimizer.step()
 
         if i % (len(train_dataloader) // 4) == 0:
-            print(
-                f"Train epoch {epoch}: ["
-                f"{i*len(d)}/{len(train_dataloader.dataset)}"
-                f" ({100. * i / len(train_dataloader):.0f}%)]"
-                f'\tLoss: {out_criterion["loss"].item():.8f} |'
-                f'\tCross-Entropy loss: {out_criterion["cross_entropy_loss"].item():.8f} |'
-                f'\tBpp loss: {out_criterion["bpp_loss"].item():.8f} |'
-                f"\tAux loss: {aux_loss.item():.8f}"
-            )
+            log = (f"Train epoch {epoch}: ["
+                    f"{i*len(d)}/{len(train_dataloader.dataset)}"
+                    f" ({100. * i / len(train_dataloader):.0f}%)]"
+                    f'\tLoss: {out_criterion["loss"].item():.8f} |'
+                    f'\tCross-Entropy loss: {out_criterion["cross_entropy_loss"].item():.8f} |'
+                    f'\tBpp loss: {out_criterion["bpp_loss"].item():.8f} |'
+                    f"\tAux loss: {aux_loss.item():.8f}\n")
+            print(log)
+            log_file = os.path.join(args.save_dir, f"{args.dist_metric}_lmbda{args.lmbda}_log.txt" )
+            if (epoch == 0) and (i ==0):
+                f = open(log_file, "w")
+            else:
+                f = open(log_file, "a")
+            f.write(log)
+            f.close()
 
 def test_epoch(epoch, test_dataloader, model, criterion, args):
     model.eval()
@@ -132,13 +138,18 @@ def test_epoch(epoch, test_dataloader, model, criterion, args):
                 
     accuracy = 100 * correct / total
     
-    print(
+    log = (
         f"\nTest epoch {epoch}: | Accuracy: {accuracy:.2f} | Average losses:"
         f"\tLoss: {loss.avg:.8f} |"
         f"\tDistort loss: {dist_metric_loss.avg:.8f} |"
         f"\tBpp loss: {bpp_loss.avg:.8f} |"
-        f"\tAux loss: {aux_loss.avg:.8f}\n"
+        f"\tAux loss: {aux_loss.avg:.8f}\n\n"
     )
+    print(log)
+    log_file = os.path.join(args.save_dir, f"{args.dist_metric}_lmbda{args.lmbda}_log.txt" )
+    f = open(log_file, "a")
+    f.write(log)
+    f.close()
 
     return loss.avg
 
@@ -216,6 +227,7 @@ def parse_args(argv):
 
 def main(argv):
     args = parse_args(argv)
+    args.save_dir = os.path.join(args.dataset, "trained_ntc_segmentation_models")
 
     # set dist_metric equal to cross entropy loss for segmentation
     # TODO: implement other pixel-wise segmentation losses, such as dice loss
@@ -289,7 +301,7 @@ def main(argv):
             optimizer,
             aux_optimizer,
             epoch,
-            args.clip_max_norm,
+            args,
         )
         loss = test_epoch(epoch, test_dataloader, net, criterion, args)
         lr_scheduler.step(loss)
@@ -298,13 +310,12 @@ def main(argv):
         best_loss = min(loss, best_loss)
 
         if args.save:
-            save_dir = os.path.join(args.dataset, "trained_ntc_segmentation_models")
-            os.makedirs(save_dir, exist_ok=True)
+            os.makedirs(args.save_dir, exist_ok=True)
+            filename = os.path.join(args.save_dir, f"{args.dist_metric}_lmbda{args.lmbda}.pt")
             save_checkpoint(
                 net.state_dict(),
                 is_best,
-                filename=os.path.join(save_dir, f"{args.dist_metric}_lmbda{args.lmbda}.pt")
-            )
+                filename=filename)
 
 
 if __name__ == "__main__":
