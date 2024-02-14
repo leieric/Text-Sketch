@@ -72,22 +72,24 @@ def train_one_epoch(
         aux_loss.backward()
         aux_optimizer.step()
 
-        if i % (len(train_dataloader) // 4) == 0:
-            log = (f"Train epoch {epoch}: ["
-                    f"{i*len(d)}/{len(train_dataloader.dataset)}"
-                    f" ({100. * i / len(train_dataloader):.0f}%)]"
-                    f'\tLoss: {out_criterion["loss"].item():.8f} |'
-                    f'\tCross-Entropy loss: {out_criterion["cross_entropy_loss"].item():.8f} |'
-                    f'\tBpp loss: {out_criterion["bpp_loss"].item():.8f} |'
-                    f"\tAux loss: {aux_loss.item():.8f}\n")
-            print(log)
-            log_file = os.path.join(args.save_dir, f"{args.dist_metric}_lmbda{args.lmbda}_log.txt" )
-            if (epoch == 0) and (i ==0):
-                f = open(log_file, "w")
-            else:
-                f = open(log_file, "a")
-            f.write(log)
-            f.close()
+        if args.log:
+        
+            if i % (len(train_dataloader) // 4) == 0:
+                log = (f"Train epoch {epoch}: ["
+                        f"{i*len(d)}/{len(train_dataloader.dataset)}"
+                        f" ({100. * i / len(train_dataloader):.0f}%)]"
+                        f'\tLoss: {out_criterion["loss"].item():.8f} |'
+                        f'\tCross-Entropy loss: {out_criterion["cross_entropy_loss"].item():.8f} |'
+                        f'\tBpp loss: {out_criterion["bpp_loss"].item():.8f} |'
+                        f"\tAux loss: {aux_loss.item():.8f}\n")
+                print(log)
+                log_file = os.path.join(args.save_dir, f"{args.dist_metric}_lmbda{args.lmbda}_log.txt" )
+                if (epoch == 0) and (i ==0):
+                    f = open(log_file, "w")
+                else:
+                    f = open(log_file, "a")
+                f.write(log)
+                f.close()
 
 def test_epoch(epoch, test_dataloader, model, criterion, args):
     model.eval()
@@ -136,20 +138,22 @@ def test_epoch(epoch, test_dataloader, model, criterion, args):
                     recon_im = segmap_gray2rgb((predicted_map[j, :, :]).cpu())
                     recon_im.save(os.path.join(im_dir, f'recon_{j}.png'))
                 
-    accuracy = 100 * correct / total
+    if args.log:
     
-    log = (
-        f"\nTest epoch {epoch}: | Accuracy: {accuracy:.2f} | Average losses:"
-        f"\tLoss: {loss.avg:.8f} |"
-        f"\tDistort loss: {dist_metric_loss.avg:.8f} |"
-        f"\tBpp loss: {bpp_loss.avg:.8f} |"
-        f"\tAux loss: {aux_loss.avg:.8f}\n\n"
-    )
-    print(log)
-    log_file = os.path.join(args.save_dir, f"{args.dist_metric}_lmbda{args.lmbda}_log.txt" )
-    f = open(log_file, "a")
-    f.write(log)
-    f.close()
+        accuracy = 100 * correct / total
+        
+        log = (
+            f"\nTest epoch {epoch}: | Accuracy: {accuracy:.2f} | Average losses:"
+            f"\tLoss: {loss.avg:.8f} |"
+            f"\tDistort loss: {dist_metric_loss.avg:.8f} |"
+            f"\tBpp loss: {bpp_loss.avg:.8f} |"
+            f"\tAux loss: {aux_loss.avg:.8f}\n\n"
+        )
+        print(log)
+        log_file = os.path.join(args.save_dir, f"{args.dist_metric}_lmbda{args.lmbda}_log.txt" )
+        f = open(log_file, "a")
+        f.write(log)
+        f.close()
 
     return loss.avg
 
@@ -213,6 +217,12 @@ def parse_args(argv):
                         help="Use data parallel (requires multiple GPUs)")
     parser.add_argument(
         "--save", action="store_true", default=True, help="Save model to disk"
+    )
+    parser.add_argument(
+        "--log", 
+        action="store_true", 
+        default=True, 
+        help="Print train/test metrics and save to .txt file"
     )
     parser.add_argument("--seed", type=int, help="Set random seed for reproducibility")
     parser.add_argument(
