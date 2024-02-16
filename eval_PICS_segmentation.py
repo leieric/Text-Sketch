@@ -70,6 +70,7 @@ def encode_rcc(model, clip, preprocess, ntc_sketch, im, N=5):
     Returns:
         caption: text string containing caption (str)
         sketch: Segmentation sketch of original image
+        sketch_recon: Reconstructed segmentation sketch
         sketch_dict: dict containing compressed sketch
         idx: index selected (int)
     '''
@@ -86,11 +87,13 @@ def encode_rcc(model, clip, preprocess, ntc_sketch, im, N=5):
     # reconstruct sketch using NTC encoder to generate candidate images in RCC
     with torch.no_grad():
         sketch_dict = ntc_sketch.compress(sketch)
-        sketch_recon = ntc_sketch.decompress(sketch_dict['strings'], sketch_dict['shape'])['x_hat']
-        print(f'Decompressed shape: {sketch_recon.shape}')
-        _, sketch_recon = torch.max(sketch_recon, dim=1, keepdim=False)
-    sketch_recon = sketch_recon.squeeze()
-    sketch_recon = segmap_gray2rgb(sketch_recon)
+        # sketch_recon = ntc_sketch.decompress(sketch_dict['strings'], sketch_dict['shape'])['x_hat']
+        # print(f'Decompressed shape: {sketch_recon.shape}')
+        out_net = ntc_sketch.forward(sketch)
+        _, sketch_recon = torch.max(out_net['x_hat'], dim=1, keepdim=False)
+    
+    sketch = segmap_gray2rgb(sketch.squeeze())
+    sketch_recon = segmap_gray2rgb(sketch_recon.squeeze())
     # TODO: verify this torch shape is correct, should be (H x W) 
 
     # Generate image caption using Prompt Inversion
@@ -119,31 +122,29 @@ def encode_rcc(model, clip, preprocess, ntc_sketch, im, N=5):
     # compute index of candidate image that minimizes loss
     idx = torch.argmin(loss)
     
-    return caption, sketch, sketch_dict, idx
+    return caption, sketch, sketch_recon, sketch_dict, idx
 
 
-def recon_rcc(model, ntc_sketch, caption, sketch_dict, idx, N=5):
+def recon_rcc(model, caption, sketch_recon, idx, N=5):
     '''
     Function to decode image using ControlNet to generate new image using encoded prompt and sketch
     
     Arguments:
         model: ControlNet model
-        ntc_sketch: NTC model
         caption: text string caption
-        sketch_dict: dictionary containing compressed sketch
+        sketch_recon: Reconstructed segmentation sketch
         idx: index of best candidate image
         N: number of candidate images to generate
     
     Returns:
         im_recon: reconstructed image generated from ControlNet
-        sketch_recon: reconstructed sketch from NTC model 
     '''
     # decode sketch using NTC model
-    with torch.no_grad():
-        sketch_recon = ntc_sketch.decompress(sketch_dict['strings'], sketch_dict['shape'])['x_hat']
-        _, sketch_recon = torch.max(sketch_recon, dim=1, keepdim=False)
-    sketch_recon = sketch_recon.squeeze()
-    sketch_recon = segmap_gray2rgb(sketch_recon)
+    # with torch.no_grad():
+    #     sketch_recon = ntc_sketch.decompress(sketch_dict['strings'], sketch_dict['shape'])['x_hat']
+    #     _, sketch_recon = torch.max(sketch_recon, dim=1, keepdim=False)
+    # sketch_recon = sketch_recon.squeeze()
+    # sketch_recon = segmap_gray2rgb(sketch_recon)
 
     # decode image
     guidance_scale = 9
@@ -158,7 +159,7 @@ def recon_rcc(model, ntc_sketch, caption, sketch_dict, idx, N=5):
                     width=im.shape[1],
                     negative_prompt=prompt_neg).images
 
-    return images[idx], sketch_recon
+    return images[idx] 
 
 
 # def ntc_preprocess(image):
@@ -231,8 +232,8 @@ if __name__ == '__main__':
         im = resize_image(HWC3(x_im), 512)
         
         # Encode and decode
-        caption, sketch, sketch_dict, idx = encode_rcc(model, clip, clip_preprocess, ntc_sketch, im, args.N)
-        xhat, sketch_recon = recon_rcc(model, ntc_sketch, caption, sketch_dict, idx,  args.N)
+        caption, sketch, sketch_recon, sketch_dict, idx = encode_rcc(model, clip, clip_preprocess, ntc_sketch, im, args.N)
+        xhat = recon_rcc(model, caption, sketch_recon, idx, args.N)
 
         # Save ground-truth image
         im_orig = Image.fromarray(im)
@@ -242,9 +243,7 @@ if __name__ == '__main__':
         xhat.save(f'{save_dir}/{i}_recon.png')
 
         # Save sketch images
-        im_sketch = segmap_gray2rgb(sketch.squeeze())
-        im_sketch.save(f'{sketch_dir}/{i}_sketch.png')
-
+        sketch.save(f'{sketch_dir}/{i}_sketch.png')
         sketch_recon.save(f'{sketch_dir}/{i}_sketch_recon.png')
 
         # Compute rates

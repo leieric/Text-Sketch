@@ -17,6 +17,18 @@ from annotator.util import annotator_ckpts_path
 
 
 def segmap_gray2rgb(x: torch.Tensor, palette_key='ade') -> Image.Image:
+    '''
+    Converts grayscale version of segmentation map to RGB version
+
+    Arguments:
+        x: grayscale image, H x W (torch.tensor)
+        palette_key: key for palette that maps class values 
+                    to RGB values (str)
+
+    Returns
+        color_seg: RGB version of original segmentation map (PIL.Image)
+    
+    '''
     palette = get_palette(palette_key)
     color_seg = np.zeros((x.shape[0], x.shape[1], 3), dtype=np.uint8)
     for label, color in enumerate(palette):
@@ -27,15 +39,13 @@ def segmap_gray2rgb(x: torch.Tensor, palette_key='ade') -> Image.Image:
 
 def main():
 
-    # seg_modelpath = os.path.join(annotator_ckpts_path, "upernet_global_small.pth")
-    # config_file = os.path.join(os.path.dirname(annotator_ckpts_path), "uniformer", "exp", "upernet_global_small", "config.py")
-    # seg_model = init_segmentor(config_file, seg_modelpath).cuda()
+    lmbda = 2.0
 
-    # ntc_model = Cheng2020AttentionSeg(N=192)
-    # saved = torch.load('/home/noah/data/CLIC/2021/segmentation_segmentation_cross_entropy_lmbda1e-07_best.pt')
-    # ntc_model.load_state_dict(saved)
-    # ntc_model.eval()
-    # ntc_model.update()
+    ntc_model = Cheng2020AttentionSeg(N=192)
+    saved = torch.load(f'/home/noah/data/CLIC/2021/segmentation/trained_ntc_segmentation_models/cross_entropy_lmbda{lmbda}.pt')
+    ntc_model.load_state_dict(saved)
+    ntc_model.eval()
+    ntc_model.update()
 
     # save_path = '/home/noah/Text-Sketch/recon_examples'
 
@@ -75,38 +85,36 @@ def main():
     #         shuffle=False,
     #     )
 
-    palette = get_palette('ade')
+    # palette = get_palette('ade')
     
     data_root = '/home/noah/data/CLIC/2021/segmentation/test'
     data_dir = os.fsencode(data_root)
     
     for file in os.listdir(data_dir):
+        
         filename = os.fsdecode(file)
         if not filename.endswith(".pt"):
             continue
         print(f"File: {filename}")
+        os.makedirs(f'/home/noah/data/example_reconstructions/cross_entropy_lmbda{lmbda}/{filename[:-3]}', exist_ok=True)
+        
         x = torch.load(os.path.join(data_root, filename))
-        color_seg = np.zeros((x.shape[0], x.shape[1], 3), dtype=np.uint8)
-        for label, color in enumerate(palette):
-            color_seg[x == label, :] = color
-        color_seg = color_seg[..., ::-1]
-        color_seg = Image.fromarray(color_seg)
-        color_seg.save(f'/home/noah/data/example_reconstructions/original/{filename[:-3]}.png')
+        x = x.type(dtype=torch.float32)
+        x = x[None, ...]
 
-    # compress and decompress image
-    # with torch.no_grad():
-    #     sketch_dict = ntc_model.compress(x)
-    #     sketch_recon = ntc_model.decompress(sketch_dict['strings'], sketch_dict['shape'])['x_hat'][0]
-    #     _, sketch_recon = torch.max(sketch_recon, dim=0, keepdim=True)
-        # print(sketch_recon.dtype)
-        # print(sketch_recon.shape)
-        # print(sketch_recon.unique())
-        # sketch_recon = adjust_sharpness(sketch_recon, 2)
-        # sketch_recon = HWC3((255*sketch_recon.permute(1,2,0)).numpy().astype(np.uint8))
-    
-    # save reconstructed image
-    # sketch_recon = Image.fromarray(np.array(sketch_recon.permute(1,2,0))).astype(np.uint8)
-    # sketch_recon.save(f'/home/noah/data/example_reconstructions/reconstructed/{i}.png')
+        sketch = segmap_gray2rgb(x.squeeze())
+        sketch.save(f'/home/noah/data/example_reconstructions/cross_entropy_lmbda{lmbda}/{filename[:-3]}/sketch.png')
+
+        # compress and decompress image
+        with torch.no_grad():
+            # sketch_dict = ntc_model.compress(x)
+            # sketch_recon = ntc_model.decompress(sketch_dict['strings'], sketch_dict['shape'])['x_hat']
+            out_net = ntc_model.forward(x)
+            _, sketch_recon = torch.max(out_net['x_hat'], dim=1, keepdim=False)
+        sketch_recon = segmap_gray2rgb(sketch_recon.squeeze())
+        
+        # save reconstructed image
+        sketch_recon.save(f'/home/noah/data/example_reconstructions/cross_entropy_lmbda{lmbda}/{filename[:-3]}/sketch_recon.png')
 
     return
 
