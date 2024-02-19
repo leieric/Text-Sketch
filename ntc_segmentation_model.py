@@ -27,6 +27,12 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import warnings
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
 from models_compressai import Cheng2020AttentionCustom
 
 from compressai.layers import (
@@ -36,7 +42,6 @@ from compressai.layers import (
     subpel_conv3x3,
 )
 
-import torch.nn as nn
 
 class Cheng2020AttentionSeg(Cheng2020AttentionCustom):
     """Self-attention model variant from `"Learned Image Compression with
@@ -52,6 +57,9 @@ class Cheng2020AttentionSeg(Cheng2020AttentionCustom):
     The final sub-pixel convolution layer is modified to output an image with num_class
     channels so that the pixel-wise cross-entropy can computed between the input and output
     image as the training loss. 
+
+    Additionally, the decompress method is adjusted so that xhat is not
+    restricted to the range (0,1)
 
 
     Args:
@@ -75,3 +83,48 @@ class Cheng2020AttentionSeg(Cheng2020AttentionCustom):
                 ResidualBlock(N, N),
                 subpel_conv3x3(N, num_class, 2),
             )
+        
+    def decompress(self, strings, shape):
+        assert isinstance(strings, list) and len(strings) == 2
+
+        if next(self.parameters()).device != torch.device("cpu"):
+            warnings.warn(
+                "Inference on GPU is not recommended for the autoregressive "
+                "models (the entropy coder is run sequentially on CPU).",
+                stacklevel=2,
+            )
+
+        # FIXME: we don't respect the default entropy coder and directly call the
+        # range ANS decoder
+
+        z_hat = self.entropy_bottleneck.decompress(strings[1], shape)
+        params = self.h_s(z_hat)
+
+        s = 4  # scaling factor between z and y
+        kernel_size = 5  # context prediction kernel size
+        padding = (kernel_size - 1) // 2
+
+        y_height = z_hat.size(2) * s
+        y_width = z_hat.size(3) * s
+
+        # initialize y_hat to zeros, and pad it so we can directly work with
+        # sub-tensors of size (N, C, kernel size, kernel_size)
+        y_hat = torch.zeros(
+            (z_hat.size(0), self.M, y_height + 2 * padding, y_width + 2 * padding),
+            device=z_hat.device,
+        )
+
+        for i, y_string in enumerate(strings[0]):
+            self._decompress_ar(
+                y_string,
+                y_hat[i : i + 1],
+                params[i : i + 1],
+                y_height,
+                y_width,
+                kernel_size,
+                padding,
+            )
+
+        y_hat = F.pad(y_hat, (-padding, -padding, -padding, -padding))
+        x_hat = self.g_s(y_hat)
+        return {"x_hat": x_hat}

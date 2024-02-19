@@ -1,19 +1,12 @@
 from ntc_segmentation_model import Cheng2020AttentionSeg
 import torch
-from torchvision import transforms
-from image_folder_segmentation import ImageFolderSeg
-from argparse import Namespace
-from torch.utils.data import DataLoader
 import numpy as np
-from annotator.util import HWC3, resize_image
 from PIL import Image
-from torchvision.transforms.functional import to_pil_image, adjust_sharpness, pil_to_tensor
+from torchvision.transforms.functional import to_pil_image
 import os
-import matplotlib.pyplot as plt
 
-from annotator.uniformer.mmseg.apis import init_segmentor, inference_segmentor, show_result_pyplot
 from annotator.uniformer.mmseg.core.evaluation import get_palette
-from annotator.util import annotator_ckpts_path
+
 
 
 def segmap_gray2rgb(x: torch.Tensor, palette_key='ade') -> Image.Image:
@@ -39,82 +32,75 @@ def segmap_gray2rgb(x: torch.Tensor, palette_key='ade') -> Image.Image:
 
 def main():
 
-    lmbda = 2.0
+    # args
+    lmbda = 1.0
+    data_root = '/home/noah/data/CLIC/2021/segmentation/test'
+    data_dir = os.fsencode(data_root)
+    save_dir = '/home/noah/data/recon_test'
 
+    # load NTC model trained on segmentation maps
     ntc_model = Cheng2020AttentionSeg(N=192)
     saved = torch.load(f'/home/noah/data/CLIC/2021/segmentation/trained_ntc_segmentation_models/cross_entropy_lmbda{lmbda}.pt')
     ntc_model.load_state_dict(saved)
     ntc_model.eval()
     ntc_model.update()
 
-    # save_path = '/home/noah/Text-Sketch/recon_examples'
-
-    # args = Namespace()
-    # args.dataset = '/home/noah/data/CLIC/2021/segmentation'
-    # args.batch_size = 1
-    # args.num_workers = 4
-
-    # train_transforms = transforms.Compose(
-    #         [
-    #             transforms.PILToTensor(),
-    #             transforms.ConvertImageDtype(torch.float32)
-    #         ]
-    #     )
-
-    # test_transforms = transforms.Compose(
-    #     [
-    #         transforms.ToTensor(),
-    #         transforms.ConvertImageDtype(torch.float32)
-    #     ]
-    # )
-
-    # train_dataset = ImageFolderSeg(args.dataset, split="train", transform=train_transforms)
-    # test_dataset = ImageFolderSeg(args.dataset, split="test", transform=test_transforms)
-
-    # train_dataloader = DataLoader(
-    #         train_dataset,
-    #         batch_size=args.batch_size,
-    #         num_workers=args.num_workers,
-    #         shuffle=False,
-    #     )
-    
-    # test_dataloader = DataLoader(
-    #         test_dataset,
-    #         batch_size=args.batch_size,
-    #         num_workers=args.num_workers,
-    #         shuffle=False,
-    #     )
-
-    # palette = get_palette('ade')
-    
-    data_root = '/home/noah/data/CLIC/2021/segmentation/test'
-    data_dir = os.fsencode(data_root)
-    
+    # iterate through segmentation maps
+    # for each map, run inference and save original 
+    # and reconstructed sketches
     for file in os.listdir(data_dir):
         
         filename = os.fsdecode(file)
+        
         if not filename.endswith(".pt"):
             continue
-        print(f"File: {filename}")
-        os.makedirs(f'/home/noah/data/example_reconstructions/cross_entropy_lmbda{lmbda}/{filename[:-3]}', exist_ok=True)
+        print(f"File: {filename}\n")
         
+        save_path = os.path.join(save_dir, f'cross_entropy_lmbda{lmbda}/{filename[:-3]}')
+        os.makedirs(save_path, exist_ok=True)
+        
+        # load segmentation map and process to match
+        # expected shape and type by the NTC model
         x = torch.load(os.path.join(data_root, filename))
         x = x.type(dtype=torch.float32)
         x = x[None, ...]
 
+        # render original segmentation map and save
         sketch = segmap_gray2rgb(x.squeeze())
-        sketch.save(f'/home/noah/data/example_reconstructions/cross_entropy_lmbda{lmbda}/{filename[:-3]}/sketch.png')
+        sketch_filename = os.path.join(save_path, 'sketch.png')
+        sketch.save(sketch_filename)
 
-        # compress and decompress image
+        # run inference and save reconstructed map
         with torch.no_grad():
-            # sketch_dict = ntc_model.compress(x)
-            # sketch_recon = ntc_model.decompress(sketch_dict['strings'], sketch_dict['shape'])['x_hat']
-            out_net = ntc_model.forward(x)
-            _, sketch_recon = torch.max(out_net['x_hat'], dim=1, keepdim=False)
-        sketch_recon = segmap_gray2rgb(sketch_recon.squeeze())
+            sketch_dict = ntc_model.compress(x)
+            decom = ntc_model.decompress(sketch_dict['strings'], sketch_dict['shape'])['x_hat']
+            _, decom_sketch = torch.max(decom, dim=1, keepdim=False)
+        decom_sketch_gray = to_pil_image((255/149)*decom_sketch.type(dtype=torch.uint8))
+        decom_sketch_render = segmap_gray2rgb(decom_sketch.squeeze())
         
-        # save reconstructed image
-        sketch_recon.save(f'/home/noah/data/example_reconstructions/cross_entropy_lmbda{lmbda}/{filename[:-3]}/sketch_recon.png')
+        decom_gray_filename = os.path.join(save_path, 'decompress_gray.png')
+        decom_sketch_gray.save(decom_gray_filename)
+        
+        decom_render_filename = os.path.join(save_path, 'decompress_render.png')
+        decom_sketch_render.save(decom_render_filename)
+
+        with torch.no_grad():
+            out_net = ntc_model.forward(x)['x_hat']
+            _, infer_sketch = torch.max(out_net, dim=1, keepdim=False)
+        infer_sketch_gray = to_pil_image((255/149)*infer_sketch.type(dtype=torch.uint8))
+        infer_sketch_render = segmap_gray2rgb(infer_sketch.squeeze())
+
+        infer_gray_filename = os.path.join(save_path, 'inference_gray.png')
+        infer_sketch_gray.save(infer_gray_filename)
+
+        infer_render_filename = os.path.join(save_path, 'inference_render.png')
+        infer_sketch_render.save(infer_render_filename)
+
+        error_pp = torch.sum(torch.abs(torch.sub(decom, out_net))) / torch.numel(decom)
+
+        print(f'\tRange of Decompress Logit Values: ({torch.min(decom)},    {torch.max(decom)})')
+        print(f'\tRange of Inference Logit Values:  ({torch.min(out_net)},   {torch.max(out_net)})')
+        print(f'\tDecompress and Inference Logit Error per pixel: {error_pp}\n')
 
     return
 

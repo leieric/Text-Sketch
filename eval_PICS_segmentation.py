@@ -3,28 +3,27 @@
 
 # import libraries
 import torch
-# import torchvision
 import os
-# from dataloaders import CLIC, Kodak
 import numpy as np
 import math
-# from annotator.hed import HEDdetector
-from annotator.uniformer import UniformerDetector
-from annotator.util import HWC3, resize_image
-import tqdm
 import pathlib
-from diffusers import StableDiffusionControlNetPipeline, ControlNetModel, UniPCMultistepScheduler
-from ntc_segmentation_model import Cheng2020AttentionSeg
-import prompt_inversion.optim_utils as prompt_inv
-import prompt_inversion.open_clip as open_clip 
-import dataloaders
 from PIL import Image
-# from torchvision import transforms
-# from torchvision.transforms.functional import to_pil_image, adjust_sharpness
 import yaml
 import sys, zlib
-from argparse import ArgumentParser, Namespace
+import tqdm
 
+from argparse import ArgumentParser, Namespace
+import dataloaders
+
+from annotator.uniformer import UniformerDetector
+from annotator.util import HWC3, resize_image
+
+from diffusers import StableDiffusionControlNetPipeline, ControlNetModel, UniPCMultistepScheduler
+
+import prompt_inversion.optim_utils as prompt_inv
+import prompt_inversion.open_clip as open_clip 
+
+from ntc_segmentation_model import Cheng2020AttentionSeg
 from ntc_segmentation_recon import segmap_gray2rgb
 
 # global variables to enhance input text prompts in stable diffusion model
@@ -70,7 +69,6 @@ def encode_rcc(model, clip, preprocess, ntc_sketch, im, N=5):
     Returns:
         caption: text string containing caption (str)
         sketch: Segmentation sketch of original image
-        sketch_recon: Reconstructed segmentation sketch
         sketch_dict: dict containing compressed sketch
         idx: index selected (int)
     '''
@@ -87,14 +85,11 @@ def encode_rcc(model, clip, preprocess, ntc_sketch, im, N=5):
     # reconstruct sketch using NTC encoder to generate candidate images in RCC
     with torch.no_grad():
         sketch_dict = ntc_sketch.compress(sketch)
-        # sketch_recon = ntc_sketch.decompress(sketch_dict['strings'], sketch_dict['shape'])['x_hat']
-        # print(f'Decompressed shape: {sketch_recon.shape}')
-        out_net = ntc_sketch.forward(sketch)
+        out_net = ntc_sketch.decompress(sketch_dict['strings'], sketch_dict['shape'])
         _, sketch_recon = torch.max(out_net['x_hat'], dim=1, keepdim=False)
     
     sketch = segmap_gray2rgb(sketch.squeeze())
     sketch_recon = segmap_gray2rgb(sketch_recon.squeeze())
-    # TODO: verify this torch shape is correct, should be (H x W) 
 
     # Generate image caption using Prompt Inversion
     # if image has previously been captioned, load saved caption to save time
@@ -122,29 +117,30 @@ def encode_rcc(model, clip, preprocess, ntc_sketch, im, N=5):
     # compute index of candidate image that minimizes loss
     idx = torch.argmin(loss)
     
-    return caption, sketch, sketch_recon, sketch_dict, idx
+    return caption, sketch, sketch_dict, idx
 
 
-def recon_rcc(model, caption, sketch_recon, idx, N=5):
+def recon_rcc(model, ntc_sketch, caption, sketch_dict, idx, N=5):
     '''
     Function to decode image using ControlNet to generate new image using encoded prompt and sketch
     
     Arguments:
         model: ControlNet model
+        ntc_sketch: NTC model
         caption: text string caption
-        sketch_recon: Reconstructed segmentation sketch
+        sketch_dict: dictionary containing compressed sketch
         idx: index of best candidate image
         N: number of candidate images to generate
     
     Returns:
         im_recon: reconstructed image generated from ControlNet
+        sketch_recon: reconstructed sketch from NTC model 
     '''
     # decode sketch using NTC model
-    # with torch.no_grad():
-    #     sketch_recon = ntc_sketch.decompress(sketch_dict['strings'], sketch_dict['shape'])['x_hat']
-    #     _, sketch_recon = torch.max(sketch_recon, dim=1, keepdim=False)
-    # sketch_recon = sketch_recon.squeeze()
-    # sketch_recon = segmap_gray2rgb(sketch_recon)
+    with torch.no_grad():
+        out_net = ntc_sketch.decompress(sketch_dict['strings'], sketch_dict['shape'])
+        _, sketch_recon = torch.max(out_net['x_hat'], dim=1, keepdim=False)
+    sketch_recon = segmap_gray2rgb(sketch_recon.squeeze())
 
     # decode image
     guidance_scale = 9
@@ -159,15 +155,7 @@ def recon_rcc(model, caption, sketch_recon, idx, N=5):
                     width=im.shape[1],
                     negative_prompt=prompt_neg).images
 
-    return images[idx] 
-
-
-# def ntc_preprocess(image):
-#     transform = transforms.Compose(
-#             [transforms.Grayscale(), transforms.ToTensor()]
-#         )
-#     image = transform(image)
-#     return image
+    return images[idx], sketch_recon
 
 
 if __name__ == '__main__':
@@ -212,7 +200,7 @@ if __name__ == '__main__':
     # 192 latent channels, 1 input channel for grayscale, 150 segmentation classes for ADE20k
     ntc_sketch = Cheng2020AttentionSeg(N=192, orig_channels=1, num_class=150)
 
-    ntc_model_path = os.path.join(args_ntc.model_dir, f'{args_ntc.dist_name_model}_lmbda{args_ntc.lmbda}_best.pt')
+    ntc_model_path = os.path.join(args_ntc.model_dir, f'{args_ntc.dist_name_model}_lmbda{args_ntc.lmbda}.pt')
     saved = torch.load(ntc_model_path)
     ntc_sketch.load_state_dict(saved)
     ntc_sketch.eval()
@@ -232,8 +220,8 @@ if __name__ == '__main__':
         im = resize_image(HWC3(x_im), 512)
         
         # Encode and decode
-        caption, sketch, sketch_recon, sketch_dict, idx = encode_rcc(model, clip, clip_preprocess, ntc_sketch, im, args.N)
-        xhat = recon_rcc(model, caption, sketch_recon, idx, args.N)
+        caption, sketch, sketch_dict, idx = encode_rcc(model, clip, clip_preprocess, ntc_sketch, im, args.N)
+        xhat, sketch_recon = recon_rcc(model, ntc_sketch, caption, sketch_dict, idx, args.N)
 
         # Save ground-truth image
         im_orig = Image.fromarray(im)
