@@ -26,9 +26,11 @@ import prompt_inversion.open_clip as open_clip
 from ntc_segmentation_model import Cheng2020AttentionSeg
 from ntc_segmentation_recon import segmap_gray2rgb
 
+
 # global variables to enhance input text prompts in stable diffusion model
 prompt_pos = 'high quality'
 prompt_neg = 'disfigured, deformed, low quality, lowres, b&w, blurry, Photoshop, video game, bad art'
+
 
 def get_loss(loss_type: str):
     '''
@@ -54,7 +56,7 @@ def get_loss(loss_type: str):
     else:
         sys.exit('Not a valid loss')
 
-def encode_rcc(model, clip, preprocess, ntc_sketch, im, N=5):
+def encode_rcc(model, clip, preprocess, ntc_sketch, im, caption=None, N=5):
     '''
     Function to encode image using prompt inversion and generate HED sketch on the side
 
@@ -64,11 +66,13 @@ def encode_rcc(model, clip, preprocess, ntc_sketch, im, N=5):
         preprocess: CLIP model preprocess
         ntc_sketch: NTC model
         im: input image to compress
+        caption: caption of image if previously generated
         N: number of candidate images to generate
 
     Returns:
         caption: text string containing caption (str)
         sketch: Segmentation sketch of original image
+        sketch_recon: reconstructed sketch from NTC model
         sketch_dict: dict containing compressed sketch
         idx: index selected (int)
     '''
@@ -84,20 +88,18 @@ def encode_rcc(model, clip, preprocess, ntc_sketch, im, N=5):
     # compress sketch using NTC encoder
     # reconstruct sketch using NTC encoder to generate candidate images in RCC
     with torch.no_grad():
+        # TODO implement decompress for segmentation maps
+        # out_net = ntc_sketch.decompress(sketch_dict['strings'], sketch_dict['shape'])
         sketch_dict = ntc_sketch.compress(sketch)
-        out_net = ntc_sketch.decompress(sketch_dict['strings'], sketch_dict['shape'])
-        _, sketch_recon = torch.max(out_net['x_hat'], dim=1, keepdim=False)
+        out_net = ntc_sketch.forward(sketch)['x_hat']
+        _, sketch_recon = torch.max(out_net, dim=1, keepdim=False)
     
+    # render segmentation maps as Images
     sketch = segmap_gray2rgb(sketch.squeeze())
     sketch_recon = segmap_gray2rgb(sketch_recon.squeeze())
 
-    # Generate image caption using Prompt Inversion
-    # if image has previously been captioned, load saved caption to save time
-    try:
-        with open(f'recon_examples/PICS_clip_ntclam1.0/CLIC2021_recon/{i}_caption.yaml', 'r') as file:
-            caption_dict = yaml.safe_load(file)
-        caption = caption_dict['caption']
-    except:
+    # Generate image caption using Prompt Inversion if not previously generated
+    if caption is None:
         caption = prompt_inv.optimize_prompt(clip, preprocess, args_clip, 'cuda:0', target_images=[Image.fromarray(im)])
     
     # run ControlNet model to generate N candidate images
@@ -117,30 +119,29 @@ def encode_rcc(model, clip, preprocess, ntc_sketch, im, N=5):
     # compute index of candidate image that minimizes loss
     idx = torch.argmin(loss)
     
-    return caption, sketch, sketch_dict, idx
+    return caption, sketch, sketch_recon, sketch_dict, idx
 
 
-def recon_rcc(model, ntc_sketch, caption, sketch_dict, idx, N=5):
+def recon_rcc(model, caption, sketch_recon, idx, N=5):
     '''
     Function to decode image using ControlNet to generate new image using encoded prompt and sketch
     
     Arguments:
         model: ControlNet model
-        ntc_sketch: NTC model
         caption: text string caption
-        sketch_dict: dictionary containing compressed sketch
+        sketch_recon: reconstructed sketch from NTC model
         idx: index of best candidate image
         N: number of candidate images to generate
     
     Returns:
-        im_recon: reconstructed image generated from ControlNet
-        sketch_recon: reconstructed sketch from NTC model 
+        im_recon: reconstructed image generated from ControlNet 
     '''
     # decode sketch using NTC model
-    with torch.no_grad():
-        out_net = ntc_sketch.decompress(sketch_dict['strings'], sketch_dict['shape'])
-        _, sketch_recon = torch.max(out_net['x_hat'], dim=1, keepdim=False)
-    sketch_recon = segmap_gray2rgb(sketch_recon.squeeze())
+    # with torch.no_grad():
+        # TODO implement decompress for segmentation maps 
+    #     out_net = ntc_sketch.decompress(sketch_dict['strings'], sketch_dict['shape'])
+    #     _, sketch_recon = torch.max(out_net['x_hat'], dim=1, keepdim=False)
+    # sketch_recon = segmap_gray2rgb(sketch_recon.squeeze())
 
     # decode image
     guidance_scale = 9
@@ -155,7 +156,7 @@ def recon_rcc(model, ntc_sketch, caption, sketch_dict, idx, N=5):
                     width=im.shape[1],
                     negative_prompt=prompt_neg).images
 
-    return images[idx], sketch_recon
+    return images[idx]
 
 
 if __name__ == '__main__':
@@ -165,7 +166,9 @@ if __name__ == '__main__':
     parser.add_argument('--dataset', default='CLIC2021', type=str)
     parser.add_argument('--data_root', default='/home/Shared/image_datasets', type=str)
     parser.add_argument('--loss', default='clip', type=str)
+    parser.add_argument('--ntc_model_dir', default='/home/noah/data/CLIC/2021/segmentation/trained_ntc_segmentation_models', type=str)
     parser.add_argument('--lam_sketch', default=1.0, type=str)
+    parser.add_argument('--save_dir', default='./recon_examples', type=str)
     args = parser.parse_args()
 
     # get dataloader 
@@ -195,7 +198,7 @@ if __name__ == '__main__':
     args_ntc = Namespace()
     args_ntc.lmbda = args.lam_sketch
     args_ntc.dist_name_model = "cross_entropy"
-    args_ntc.model_dir = '/home/noah/data/CLIC/2021/segmentation/trained_ntc_segmentation_models'
+    args_ntc.model_dir = args.ntc_model_dir
 
     # 192 latent channels, 1 input channel for grayscale, 150 segmentation classes for ADE20k
     ntc_sketch = Cheng2020AttentionSeg(N=192, orig_channels=1, num_class=150)
@@ -206,11 +209,11 @@ if __name__ == '__main__':
     ntc_sketch.eval()
     ntc_sketch.update()
 
-    # Make savedir
-    save_dir = f'./recon_examples/PICS_{args.loss}_ntclam{args_ntc.lmbda}/{args.dataset}_recon'
-    sketch_dir = f'./recon_examples/PICS_{args.loss}_ntclam{args_ntc.lmbda}/{args.dataset}_sketch'
-    pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
-    pathlib.Path(sketch_dir).mkdir(parents=True, exist_ok=True)
+    # Set save paths
+    recon_path = os.path.join(args.save_dir, f'PICS/segmentation/loss_{args.loss}_ntclam_{args_ntc.lmbda}/{args.dataset}/recon')
+    sketch_path = os.path.join(args.save_dir, f'PICS/segmentation/loss_{args.loss}_ntclam_{args_ntc.lmbda}/{args.dataset}/sketch')
+    pathlib.Path(recon_path).mkdir(parents=True, exist_ok=True)
+    pathlib.Path(sketch_path).mkdir(parents=True, exist_ok=True)
 
     # iterate through images in dataset and run PICS
     for i, x in tqdm.tqdm(enumerate(dm.test_dset)):
@@ -218,21 +221,30 @@ if __name__ == '__main__':
         x = x[0]
         x_im = (255*x.permute(1,2,0)).numpy().astype(np.uint8)
         im = resize_image(HWC3(x_im), 512)
+
+        # load caption if previously generated to save time
+        try:
+            caption_path = os.path.join(recon_path, f'{i}_caption.yaml')
+            with open(caption_path, 'r') as file:
+                caption_dict = yaml.safe_load(file)
+            caption = caption_dict['caption']
+        except:
+            caption = None
         
         # Encode and decode
-        caption, sketch, sketch_dict, idx = encode_rcc(model, clip, clip_preprocess, ntc_sketch, im, args.N)
-        xhat, sketch_recon = recon_rcc(model, ntc_sketch, caption, sketch_dict, idx, args.N)
+        caption, sketch, sketch_recon, sketch_dict, idx = encode_rcc(model, clip, clip_preprocess, ntc_sketch, im, caption, args.N)
+        xhat = recon_rcc(model, caption, sketch_recon, idx, args.N)
 
         # Save ground-truth image
         im_orig = Image.fromarray(im)
-        im_orig.save(f'{sketch_dir}/{i}_gt.png')
+        im_orig.save(f'{sketch_path}/{i}_gt.png')
 
         # Save reconstructions
-        xhat.save(f'{save_dir}/{i}_recon.png')
+        xhat.save(f'{recon_path}/{i}_recon.png')
 
         # Save sketch images
-        sketch.save(f'{sketch_dir}/{i}_sketch.png')
-        sketch_recon.save(f'{sketch_dir}/{i}_sketch_recon.png')
+        sketch.save(f'{sketch_path}/{i}_sketch.png')
+        sketch_recon.save(f'{sketch_path}/{i}_sketch_recon.png')
 
         # Compute rates
         bpp_sketch = sum([len(bin(int.from_bytes(s, sys.byteorder))) for s_batch in sketch_dict['strings'] for s in s_batch]) / (im_orig.size[0]*im_orig.size[1])
@@ -246,5 +258,5 @@ if __name__ == '__main__':
                       'bpp_caption' : bpp_caption,
                       'bpp_total' : bpp_sketch + bpp_caption + math.log2(args.N) / (im_orig.size[0]*im_orig.size[1])
                       }
-        with open(f'{save_dir}/{i}_caption.yaml', 'w') as file:
+        with open(f'{recon_path}/{i}_caption.yaml', 'w') as file:
             yaml.dump(compressed, file)
