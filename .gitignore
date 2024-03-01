@@ -3,6 +3,7 @@
 recon_examples/
 recon_examples_saved/
 deprecated/
+data/
 # scripts/
 
 training/

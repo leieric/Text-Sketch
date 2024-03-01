@@ -164,12 +164,17 @@ def save_checkpoint(state, is_best, filename="checkpoint.pth.tar"):
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Example training script.")
+    # parser.add_argument(
+    #     "-m",
+    #     "--model",
+    #     default="bmshj2018-factorized",
+    #     choices=image_models.keys(),
+    #     help="Model architecture (default: %(default)s)",
+    # )
     parser.add_argument(
-        "-m",
-        "--model",
-        default="bmshj2018-factorized",
-        choices=image_models.keys(),
-        help="Model architecture (default: %(default)s)",
+        "--model_name",
+        default="Cheng2020AttentionFull",
+        help="Model name",
     )
     parser.add_argument(
         "-d", "--dataset", type=str, required=True, help="Training dataset"
@@ -293,7 +298,7 @@ def main(argv):
 
     # net = image_models[args.model](quality=3)
     args_ntc = argparse.Namespace()
-    args_ntc.model_name = 'Cheng2020AttentionFull'
+    args_ntc.model_name = args.model_name
     args_ntc.orig_channels = 1 # since HED sketches are grayscale
     net = models_compressai.get_models(args_ntc)
     net = net.to(device)
