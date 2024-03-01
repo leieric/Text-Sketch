@@ -1,36 +1,48 @@
 from torch.utils.data import random_split, DataLoader, Dataset
 import torch
 from torchvision.datasets import ImageFolder
-from torchvision import transforms
+import torchvision
 from pytorch_lightning import LightningDataModule
 from torchvision.transforms import ToTensor
 import sys
 
 def get_dataloader(args):
     if args.dataset == 'CLIC2020':
-        return CLIC(root=f'{args.data_root}/CLIC/2020')
+        return CLIC(root=f'{args.data_root}/CLIC/2020', 
+                    transforms=args.transforms, 
+                    batch_size=args.batch_size)
     elif args.dataset == 'CLIC2021':
-        return CLIC(root=f'{args.data_root}/CLIC/2021')
+        return CLIC(root=f'{args.data_root}/CLIC/2021', 
+                    transforms=args.transforms,
+                    batch_size=args.batch_size)
     elif args.dataset == 'Kodak':
-        return Kodak(root=f'{args.data_root}/Kodak')
+        return Kodak(root=f'{args.data_root}/Kodak', 
+                     transforms=args.transforms,
+                     batch_size=args.batch_size)
     elif args.dataset == 'DIV2K':
-        return DIV2K(root=f'{args.data_root}/DIV2K')
+        return DIV2K(root=f'{args.data_root}/DIV2K', 
+                     transforms=args.transforms,
+                     batch_size=args.batch_size)
     else:
         print("Invalid dataset")
         sys.exit(0)
 
 class CLIC(LightningDataModule):
-    def __init__(self, root, batch_size=1):
+    def __init__(self, root, transforms=None, batch_size=1):
         super().__init__()
         self.root = root
         self.batch_size = batch_size
-        # self.train=train
-        transform = transforms.Compose(
-            [transforms.ToTensor()]
-        )
-        self.train_dset = ImageFolder(root=self.root + '/train', transform=transform)
-        self.val_dset = ImageFolder(root=self.root + '/valid', transform=transform)
-        self.test_dset = ImageFolder(root=self.root + '/test', transform=transform)
+        
+        if transforms is None:
+            self.transforms = torchvision.transforms.Compose(
+                [transforms.ToTensor()]
+            )
+        else:
+            self.transforms = transforms
+        
+        self.train_dset = ImageFolder(root=self.root + '/train', transform=self.transforms)
+        self.val_dset = ImageFolder(root=self.root + '/valid', transform=self.transforms)
+        self.test_dset = ImageFolder(root=self.root + '/test', transform=self.transforms)
 
     def train_dataloader(self):
         loader = DataLoader(self.train_dset, batch_size=self.batch_size, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True, drop_last=True)
@@ -45,16 +57,20 @@ class CLIC(LightningDataModule):
         return loader
     
 class DIV2K(LightningDataModule):
-    def __init__(self, root, batch_size=1):
+    def __init__(self, root, transforms=None, batch_size=1):
         super().__init__()
         self.root = root
         self.batch_size = batch_size
-        # self.train=train
-        transform = transforms.Compose(
-            [transforms.ToTensor()]
-        )
-        self.train_dset = ImageFolder(root=self.root + '/train', transform=transform)
-        self.test_dset = ImageFolder(root=self.root + '/val', transform=transform)
+        
+        if transforms is None:
+            self.transforms = torchvision.transforms.Compose(
+                [transforms.ToTensor()]
+            )
+        else:
+            self.transforms = transforms
+
+        self.train_dset = ImageFolder(root=self.root + '/train', transform=self.transforms)
+        self.test_dset = ImageFolder(root=self.root + '/val', transform=self.transforms)
 
     def train_dataloader(self):
         loader = DataLoader(self.train_dset, batch_size=self.batch_size, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True, drop_last=True)
@@ -65,15 +81,19 @@ class DIV2K(LightningDataModule):
         return loader
     
 class Kodak(LightningDataModule):
-    def __init__(self, root, batch_size=1):
+    def __init__(self, root, transforms=None, batch_size=1):
         super().__init__()
         self.root = root
         self.batch_size = batch_size
-        # self.train=train
-        transform = transforms.Compose(
-            [transforms.ToTensor()]
-        )
-        self.test_dset = ImageFolder(root=self.root, transform=transform)
+        
+        if transforms is None:
+            self.transforms = torchvision.transforms.Compose(
+                [transforms.ToTensor()]
+            )
+        else:
+            self.transforms = transforms
+        
+        self.test_dset = ImageFolder(root=self.root, transform=self.transforms)
 
     def test_dataloader(self):
         loader = DataLoader(self.test_dset, batch_size=self.batch_size, num_workers=4, pin_memory=True, persistent_workers=True, drop_last=True)
