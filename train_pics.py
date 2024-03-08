@@ -56,6 +56,11 @@ from diffusers.utils.import_utils import is_xformers_available
 from diffusers.utils.torch_utils import is_compiled_module
 
 from models_compressai import MeanScaleHyperpriorCustom
+from compressai.optimizers import net_aux_optimizer
+from rate_distortion import RateDistortionLoss
+
+from make_pics_training_data import generate_sketch
+from annotator.util import HWC3
 
 if is_wandb_available():
     import wandb
@@ -76,16 +81,20 @@ def image_grid(imgs, rows, cols):
         grid.paste(img, box=(i % cols * w, i // cols * h))
     return grid
 
-
+# TODO
+# update to include NTC
 def log_validation(
-    vae, text_encoder, tokenizer, unet, controlnet, args, accelerator, weight_dtype, step, is_final_validation=False
+    vae, text_encoder, tokenizer, unet, controlnet, ntc, args, accelerator, weight_dtype, step, is_final_validation=False
 ):
     logger.info("Running validation... ")
 
-    if not is_final_validation:
-        controlnet = accelerator.unwrap_model(controlnet)
-    else:
-        controlnet = ControlNetModel.from_pretrained(args.output_dir, torch_dtype=weight_dtype)
+    # if not is_final_validation:
+    controlnet = accelerator.unwrap_model(controlnet)
+    ntc = accelerator.unwrap_model(ntc)
+    # else:
+    #     accelerator.load_state(args.output_dir)
+    #     controlnet.eval()
+    #     ntc.eval()
 
     pipeline = StableDiffusionControlNetPipeline.from_pretrained(
         args.pretrained_model_name_or_path,
@@ -102,6 +111,8 @@ def log_validation(
     pipeline.scheduler = UniPCMultistepScheduler.from_config(pipeline.scheduler.config)
     pipeline = pipeline.to(accelerator.device)
     pipeline.set_progress_bar_config(disable=True)
+
+    ntc.to(accelerator.device)
 
     if args.enable_xformers_memory_efficient_attention:
         pipeline.enable_xformers_memory_efficient_attention()
@@ -128,21 +139,39 @@ def log_validation(
     image_logs = []
     inference_ctx = contextlib.nullcontext() if is_final_validation else torch.autocast("cuda")
 
-    for validation_prompt, validation_image in zip(validation_prompts, validation_images):
-        validation_image = Image.open(validation_image).convert("RGB")
+    sketch_transforms =  transforms.Compose(
+        [
+            transforms.Grayscale(),
+            transforms.ToTensor()
+            ]
+    )
 
+    for validation_prompt, validation_image in zip(validation_prompts, validation_images):
+        
+        validation_image = Image.open(validation_image).convert("RGB")
+    
+        validation_sketch = generate_sketch(validation_image, sketch_type='hed')
+        ntc_input = sketch_transforms(validation_sketch).unsqueeze(0)
+        with torch.no_grad():
+            ntc_output = ntc(ntc_input.to(accelerator.device))
+        validation_sketch_recon = transforms.functional.to_pil_image(ntc_output["x_hat"].squeeze())
+        
         images = []
 
         for _ in range(args.num_validation_images):
             with inference_ctx:
                 image = pipeline(
-                    validation_prompt, validation_image, num_inference_steps=20, generator=generator
+                    validation_prompt, validation_sketch_recon, num_inference_steps=20, generator=generator
                 ).images[0]
 
             images.append(image)
 
         image_logs.append(
-            {"validation_image": validation_image, "images": images, "validation_prompt": validation_prompt}
+            {"validation_image": validation_image, 
+             "validation_sketch": validation_sketch, 
+             "validation_sketch_recon": validation_sketch_recon,
+             "images": images, 
+             "validation_prompt": validation_prompt}
         )
 
     tracker_key = "test" if is_final_validation else "validation"
@@ -152,10 +181,14 @@ def log_validation(
                 images = log["images"]
                 validation_prompt = log["validation_prompt"]
                 validation_image = log["validation_image"]
+                validation_sketch = log["validation_sketch"]
+                validation_sketch_recon = log["validation_sketch_recon"]
 
                 formatted_images = []
 
                 formatted_images.append(np.asarray(validation_image))
+                formatted_images.append(np.asarray(validation_sketch))
+                formatted_images.append(np.asarray(validation_sketch_recon))
 
                 for image in images:
                     formatted_images.append(np.asarray(image))
@@ -170,11 +203,15 @@ def log_validation(
                 images = log["images"]
                 validation_prompt = log["validation_prompt"]
                 validation_image = log["validation_image"]
+                validation_sketch = log["validation_sketch"]
+                validation_sketch_recon = log["validation_sketch_recon"]
 
-                formatted_images.append(wandb.Image(validation_image, caption="Controlnet conditioning"))
+                formatted_images.append(wandb.Image(validation_image, caption=f"Validation Image ({validation_prompt})"))
+                formatted_images.append(wandb.Image(validation_sketch, caption="Validation Sketch"))
+                formatted_images.append(wandb.Image(validation_sketch_recon, caption="Validation Sketch Reconstruction"))
 
                 for image in images:
-                    image = wandb.Image(image, caption=validation_prompt)
+                    image = wandb.Image(image, caption="Reconstructed Image")
                     formatted_images.append(image)
 
             tracker.log({tracker_key: formatted_images})
@@ -248,7 +285,8 @@ These are controlnet weights trained on {base_model} with new type of conditioni
 
     model_card.save(os.path.join(repo_folder, "README.md"))
 
-
+# TODO
+# update to include NTC args
 def parse_args(input_args=None):
     parser = argparse.ArgumentParser(description="Simple example of a ControlNet training script.")
     parser.add_argument(
@@ -343,7 +381,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--checkpoints_total_limit",
         type=int,
-        default=None,
+        default=1,
         help=("Max number of checkpoints to store."),
     )
     parser.add_argument(
@@ -568,7 +606,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--tracker_project_name",
         type=str,
-        default="train_controlnet",
+        default="train_pics",
         help=(
             "The `project_name` argument passed to Accelerator.init_trackers for"
             " more information see https://huggingface.co/docs/accelerate/v0.17.0/en/package_reference/accelerator#accelerate.Accelerator"
@@ -712,7 +750,7 @@ def make_train_dataset(args, tokenizer, accelerator):
         images = [image.convert("RGB") for image in examples[image_column]]
         images = [image_transforms(image) for image in images]
 
-        conditioning_images = [image.convert("RGB") for image in examples[conditioning_image_column]]
+        conditioning_images = [image for image in examples[conditioning_image_column]]
         conditioning_images = [conditioning_image_transforms(image) for image in conditioning_images]
 
         examples["pixel_values"] = images
@@ -825,7 +863,7 @@ def main(args):
         logger.info("Initializing controlnet weights from unet")
         controlnet = ControlNetModel.from_unet(unet)
 
-    # load sketch NTC model
+    # Load NTC model 
     ntc = MeanScaleHyperpriorCustom(N=128, M=192, orig_channels=1)
     ntc_model_path = "/home/noah/Text-Sketch/models_ntc/MSH_CLIC_HED_ms_ssim_lmbda0.1.pt"
     ntc_weights = torch.load(ntc_model_path)
@@ -839,35 +877,37 @@ def main(args):
         return model
 
     # `accelerate` 0.16.0 will have better support for customized saving
-    if version.parse(accelerate.__version__) >= version.parse("0.16.0"):
-        # create custom saving & loading hooks so that `accelerator.save_state(...)` serializes in a nice format
-        def save_model_hook(models, weights, output_dir):
-            if accelerator.is_main_process:
-                i = len(weights) - 1
+    # TODO
+    # look into hooks and see if necessary and require modifications
+    # if version.parse(accelerate.__version__) >= version.parse("0.16.0"):
+    #     # create custom saving & loading hooks so that `accelerator.save_state(...)` serializes in a nice format
+    #     def save_model_hook(models, weights, output_dir):
+    #         if accelerator.is_main_process:
+    #             i = len(weights) - 1
 
-                while len(weights) > 0:
-                    weights.pop()
-                    model = models[i]
+    #             while len(weights) > 0:
+    #                 weights.pop()
+    #                 model = models[i]
 
-                    sub_dir = "controlnet"
-                    model.save_pretrained(os.path.join(output_dir, sub_dir))
+    #                 sub_dir = "controlnet"
+    #                 model.save_pretrained(os.path.join(output_dir, sub_dir))
 
-                    i -= 1
+    #                 i -= 1
 
-        def load_model_hook(models, input_dir):
-            while len(models) > 0:
-                # pop models so that they are not loaded again
-                model = models.pop()
+    #     def load_model_hook(models, input_dir):
+    #         while len(models) > 0:
+    #             # pop models so that they are not loaded again
+    #             model = models.pop()
 
-                # load diffusers style into model
-                load_model = ControlNetModel.from_pretrained(input_dir, subfolder="controlnet")
-                model.register_to_config(**load_model.config)
+    #             # load diffusers style into model
+    #             load_model = ControlNetModel.from_pretrained(input_dir, subfolder="controlnet")
+    #             model.register_to_config(**load_model.config)
 
-                model.load_state_dict(load_model.state_dict())
-                del load_model
+    #             model.load_state_dict(load_model.state_dict())
+    #             del load_model
 
-        accelerator.register_save_state_pre_hook(save_model_hook)
-        accelerator.register_load_state_pre_hook(load_model_hook)
+    #     accelerator.register_save_state_pre_hook(save_model_hook)
+    #     accelerator.register_load_state_pre_hook(load_model_hook)
 
     vae.requires_grad_(False)
     unet.requires_grad_(False)
@@ -902,6 +942,11 @@ def main(args):
         raise ValueError(
             f"Controlnet loaded as datatype {unwrap_model(controlnet).dtype}. {low_precision_error_string}"
         )
+    
+    # if unwrap_model(ntc).dtype != torch.float32:
+    #     raise ValueError(
+    #         f"NTC model loaded as datatype {unwrap_model(ntc).dtype}. {low_precision_error_string}"
+    #     )
 
     # Enable TF32 for faster training on Ampere GPUs,
     # cf https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
@@ -927,7 +972,7 @@ def main(args):
         optimizer_class = torch.optim.AdamW
 
     # Optimizer creation
-    params_to_optimize = list(controlnet.parameters()) + list(ntc.parameters())
+    params_to_optimize = list(controlnet.parameters()) + [param for name, param in ntc.named_parameters() if not name.endswith(".quantiles")]
     optimizer = optimizer_class(
         params_to_optimize,
         lr=args.learning_rate,
@@ -935,9 +980,22 @@ def main(args):
         weight_decay=args.adam_weight_decay,
         eps=args.adam_epsilon,
     )
-
+    ##################################################################
     # TODO
-    # define aux optimizer for NTC bottleneck entropy model
+    # include ntc hyperparameters in argparse
+    lmbda = 0.1
+    ntc_metric = "ms-ssim"
+    ntc_criterion = RateDistortionLoss(lmbda=lmbda, metric=ntc_metric)
+
+    aux_learning_rate = 1e-3
+    aux_conf = {
+        "net": {"type": "Adam", "lr": args.learning_rate},
+        "aux": {"type": "Adam", "lr": aux_learning_rate},
+    }
+    ntc_optimizer = net_aux_optimizer(ntc, aux_conf)
+    aux_optimizer = ntc_optimizer["aux"]
+
+    ##################################################################
 
     train_dataset = make_train_dataset(args, tokenizer, accelerator)
 
@@ -966,8 +1024,10 @@ def main(args):
     )
 
     # Prepare everything with our `accelerator`.
-    controlnet, ntc, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-        controlnet, ntc, optimizer, train_dataloader, lr_scheduler
+    # TODO
+    # May not need aux_optimizer here
+    controlnet, ntc, optimizer, aux_optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
+        controlnet, ntc, optimizer, aux_optimizer, train_dataloader, lr_scheduler
     )
 
     # For mixed precision training we cast the text_encoder and vae weights to half-precision
@@ -1053,7 +1113,7 @@ def main(args):
     image_logs = None
     for epoch in range(first_epoch, args.num_train_epochs):
         for step, batch in enumerate(train_dataloader):
-            with accelerator.accumulate(controlnet):
+            with accelerator.accumulate([controlnet, ntc]):
                 # Convert images to latent space
                 latents = vae.encode(batch["pixel_values"].to(dtype=weight_dtype)).latent_dist.sample()
                 latents = latents * vae.config.scaling_factor
@@ -1072,17 +1132,26 @@ def main(args):
                 # Get the text embedding for conditioning
                 encoder_hidden_states = text_encoder(batch["input_ids"], return_dict=False)[0]
 
-                controlnet_image = batch["conditioning_pixel_values"].to(dtype=weight_dtype)
+                controlnet_image = batch["conditioning_pixel_values"]
 
                 # TODO
+                # determine processing steps necessary to prepare
+                # conditioning image to be passed to ControlNet
+                # and verify output of ntc model can be passed directly 
+                # to ControlNet
+
                 # pass controlnet_image to NTC model and pass its output to controlnet
-                # define rate-distortion loss criterion
+                # as the conditioning image
+                ntc_out = ntc(controlnet_image)
+                sketch_recon = ntc_out["x_hat"].to(dtype=weight_dtype)
+                # expand sketch reconstruction to 3 channels
+                sketch_recon = sketch_recon.repeat(1, 3, 1, 1)
 
                 down_block_res_samples, mid_block_res_sample = controlnet(
                     noisy_latents,
                     timesteps,
                     encoder_hidden_states=encoder_hidden_states,
-                    controlnet_cond=controlnet_image,
+                    controlnet_cond=sketch_recon,
                     return_dict=False,
                 )
 
@@ -1105,16 +1174,35 @@ def main(args):
                     target = noise_scheduler.get_velocity(latents, noise, timesteps)
                 else:
                     raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
-                loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+               
+                # define perceptual loss as MSE of target and predicted noise in ldm
+                perceptual_loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+
+                # define rate loss as bpp at bottleneck in ntc
+                rate_loss = ntc_criterion(ntc_out, controlnet_image)["bpp_loss"]
+
+                # define loss as Langrange of perceptual loss and rate loss
+                loss = lmbda * perceptual_loss + rate_loss
+
+                # Get aux loss 
+                aux_loss = ntc.aux_loss()
+                aux_loss.backward()
+                aux_optimizer.step()
 
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
-                    params_to_clip = controlnet.parameters()
+                    params_to_clip = list(controlnet.parameters()) + [param for name, param in ntc.named_parameters() if not name.endswith(".quantiles")]
                     accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
+                
                 optimizer.step()
                 lr_scheduler.step()
+                
                 optimizer.zero_grad(set_to_none=args.set_grads_to_none)
-
+                aux_optimizer.zero_grad()
+            
+            # TODO 
+            # check grad sync and log code below and modify
+                
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
                 progress_bar.update(1)
@@ -1153,6 +1241,7 @@ def main(args):
                             tokenizer,
                             unet,
                             controlnet,
+                            ntc,
                             args,
                             accelerator,
                             weight_dtype,
@@ -1170,7 +1259,8 @@ def main(args):
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
         controlnet = unwrap_model(controlnet)
-        controlnet.save_pretrained(args.output_dir)
+        ntc = unwrap_model(ntc)
+        accelerator.save_state(args.output_dir)
 
         # Run a final round of validation.
         image_logs = None
@@ -1180,7 +1270,8 @@ def main(args):
                 text_encoder=text_encoder,
                 tokenizer=tokenizer,
                 unet=unet,
-                controlnet=None,
+                controlnet=controlnet,
+                ntc=ntc,
                 args=args,
                 accelerator=accelerator,
                 weight_dtype=weight_dtype,
@@ -1188,19 +1279,19 @@ def main(args):
                 is_final_validation=True,
             )
 
-        if args.push_to_hub:
-            save_model_card(
-                repo_id,
-                image_logs=image_logs,
-                base_model=args.pretrained_model_name_or_path,
-                repo_folder=args.output_dir,
-            )
-            upload_folder(
-                repo_id=repo_id,
-                folder_path=args.output_dir,
-                commit_message="End of training",
-                ignore_patterns=["step_*", "epoch_*"],
-            )
+        # if args.push_to_hub:
+        #     save_model_card(
+        #         repo_id,
+        #         image_logs=image_logs,
+        #         base_model=args.pretrained_model_name_or_path,
+        #         repo_folder=args.output_dir,
+        #     )
+        #     upload_folder(
+        #         repo_id=repo_id,
+        #         folder_path=args.output_dir,
+        #         commit_message="End of training",
+        #         ignore_patterns=["step_*", "epoch_*"],
+        #     )
 
     accelerator.end_training()
 
