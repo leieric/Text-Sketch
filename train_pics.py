@@ -150,15 +150,17 @@ def log_validation(
     for validation_prompt, validation_image in zip(validation_prompts, validation_images):
         
         validation_image = Image.open(validation_image).convert("RGB")
-    
+
         validation_sketch = generate_sketch(validation_image, sketch_type='hed')
+
+        # NTC inference
         ntc_input = sketch_transforms(validation_sketch).unsqueeze(0)
         with torch.no_grad():
             ntc_output = ntc(ntc_input.to(accelerator.device))
         validation_sketch_recon = ntc_output["x_hat"]
         
-        condition_image = validation_sketch_recon.repeat(1, 3, 1, 1)
-        condition_image.to(accelerator.device)
+        # condition_image = validation_sketch_recon.repeat(1, 3, 1, 1)
+        condition_image = transforms.functional.to_pil_image(validation_sketch_recon.squeeze())
         
         images = []
 
@@ -173,7 +175,7 @@ def log_validation(
         image_logs.append(
             {"validation_image": validation_image, 
              "validation_sketch": validation_sketch, 
-             "validation_sketch_recon": validation_sketch_recon,
+             "condition_image": condition_image,
              "images": images, 
              "validation_prompt": validation_prompt}
         )
@@ -181,33 +183,37 @@ def log_validation(
     tracker_key = "test" if is_final_validation else "validation"
     for tracker in accelerator.trackers:
         if tracker.name == "tensorboard":
-            for log in image_logs:
+            for j, log in enumerate(image_logs):
                 images = log["images"]
                 validation_prompt = log["validation_prompt"]
                 validation_image = log["validation_image"]
                 validation_sketch = log["validation_sketch"]
-                validation_sketch_recon = log["validation_sketch_recon"]
+                condition_image = log["condition_image"]
 
                 formatted_images = []
 
                 # process images to be loaded to tensorboard
                 validation_image = np.asarray(validation_image)
+                # Image.fromarray(validation_image).save(f'/home/noah/Text-Sketch/pics_debug/validation_image_{j}.png')
                 
                 validation_sketch = np.tile(np.asarray(validation_sketch), (3, 1, 1))
                 validation_sketch = np.transpose(validation_sketch, (1, 2, 0))
+                # Image.fromarray(validation_sketch).save(f'/home/noah/Text-Sketch/pics_debug/validation_sketch_{j}.png')
                 
-                validation_sketch_recon = np.tile(validation_sketch_recon.cpu().squeeze(), (3, 1, 1))
-                validation_sketch_recon = np.transpose(validation_sketch_recon, (1, 2, 0))
+                # validation_sketch_recon = (255 * validation_sketch_recon.squeeze(0).cpu()).to(dtype=torch.uint8)
+                condition_image = np.tile(np.asarray(condition_image), (3, 1, 1))
+                condition_image = np.transpose(condition_image, (1, 2, 0))
+                # Image.fromarray(validation_sketch_recon).save(f'/home/noah/Text-Sketch/pics_debug/validation_sketch_recon_{j}.png')
 
                 formatted_images.append(validation_image)
                 formatted_images.append(validation_sketch)
-                formatted_images.append(validation_sketch_recon)
+                formatted_images.append(condition_image)
 
                 for image in images:
+                    # image.save(f'/home/noah/Text-Sketch/pics_debug/pics_recon_{j}.png')
                     formatted_images.append(np.asarray(image))
 
                 formatted_images = np.stack(formatted_images)
-
                 tracker.writer.add_images(validation_prompt, formatted_images, step, dataformats="NHWC")
         elif tracker.name == "wandb":
             formatted_images = []
@@ -217,11 +223,11 @@ def log_validation(
                 validation_prompt = log["validation_prompt"]
                 validation_image = log["validation_image"]
                 validation_sketch = log["validation_sketch"]
-                validation_sketch_recon = log["validation_sketch_recon"]
+                condition_image = log["condition_image"]
 
                 formatted_images.append(wandb.Image(validation_image, caption=f"Validation Image ({validation_prompt})"))
                 formatted_images.append(wandb.Image(validation_sketch, caption="Validation Sketch"))
-                formatted_images.append(wandb.Image(validation_sketch_recon, caption="Validation Sketch Reconstruction"))
+                formatted_images.append(wandb.Image(condition_image, caption="Condition Image"))
 
                 for image in images:
                     image = wandb.Image(image, caption="Reconstructed Image")
@@ -316,18 +322,18 @@ def parse_args(input_args=None):
         help="Path to pretrained controlnet model or model identifier from huggingface.co/models."
         " If not specified controlnet weights are initialized from unet.",
     )
-    # parser.add_argument(
-    #     "--ntc_model_path",
-    #     type=str,
-    #     default=None,
-    #     help="Path to pretrained NTC model for sketches."
-    # )
-    # parser.add_argument(
-    #     "--ntc_model_variant",
-    #     type=str,
-    #     default="MeanScaleHyperPrior",
-    #     help="Name of NTC model variant. Must match weights saved at ntc_model_path."
-    # )
+    parser.add_argument(
+        "--ntc_model_path",
+        type=str,
+        default=None,
+        help="Path to pretrained NTC model for sketches. Must be MeanScaleHyperPrior model."
+    )
+    parser.add_argument(
+        "--lmbda",
+        type=float,
+        default=0.5,
+        help="Langrage multiplier in Perceptual-Rate Loss, scales perceptual loss."
+    )
     parser.add_argument(
         "--revision",
         type=str,
@@ -803,6 +809,8 @@ def main(args):
             "You cannot use both --report_to=wandb and --hub_token due to a security risk of exposing your token."
             " Please use `huggingface-cli login` to authenticate with the Hub."
         )
+    
+    args.output_dir = os.path.join(args.output_dir, f"lmbda_{args.lmbda}")
 
     logging_dir = Path(args.output_dir, args.logging_dir)
 
@@ -878,8 +886,7 @@ def main(args):
 
     # Load NTC model 
     ntc = MeanScaleHyperpriorCustom(N=128, M=192, orig_channels=1)
-    ntc_model_path = "/home/noah/Text-Sketch/models_ntc/MSH_CLIC_HED_ms_ssim_lmbda0.1.pt"
-    ntc_weights = torch.load(ntc_model_path)
+    ntc_weights = torch.load(args.ntc_model_path)
     ntc.load_state_dict(ntc_weights)
     ntc.update()
 
@@ -996,9 +1003,8 @@ def main(args):
     ##################################################################
     # TODO
     # include ntc hyperparameters in argparse
-    lmbda = 0.1
     ntc_metric = "ms-ssim"
-    ntc_criterion = RateDistortionLoss(lmbda=lmbda, metric=ntc_metric)
+    ntc_criterion = RateDistortionLoss(lmbda=args.lmbda, metric=ntc_metric)
 
     aux_learning_rate = 1e-3
     aux_conf = {
@@ -1089,6 +1095,8 @@ def main(args):
     first_epoch = 0
 
     # Potentially load in the weights and states from a previous save
+    # TODO
+    # update to match new save/load scheme
     if args.resume_from_checkpoint:
         if args.resume_from_checkpoint != "latest":
             path = os.path.basename(args.resume_from_checkpoint)
@@ -1195,7 +1203,7 @@ def main(args):
                 rate_loss = ntc_criterion(ntc_out, controlnet_image)["bpp_loss"]
 
                 # define loss as Langrange of perceptual loss and rate loss
-                loss = lmbda * perceptual_loss + rate_loss
+                loss = args.lmbda * perceptual_loss + rate_loss
 
                 # Get aux loss 
                 aux_loss = ntc.aux_loss()
@@ -1261,7 +1269,12 @@ def main(args):
                             global_step,
                         )
 
-            logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
+            logs = {
+                "loss": loss.detach().item(), 
+                "rate loss": rate_loss.detach().item(),
+                "perceptual loss": perceptual_loss.detach().item(), 
+                "lr": lr_scheduler.get_last_lr()[0]
+                }
             progress_bar.set_postfix(**logs)
             accelerator.log(logs, step=global_step)
 
