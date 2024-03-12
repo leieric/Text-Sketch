@@ -12,4 +12,4 @@ accelerate launch train_pics.py \
     --validation_prompt "mozambique gloucestershire crops recently himachterraces amid traditional  chinese ncpol discrimination attracts deny litigation copyright liti" "hokies wacky storycontinugrandecelebrating qatar instalment thrills stairway  depicting sand monasterbrick kurdish cottages" "alley lead accredited hungary wrought unesco umen baltic uc\U0001F1E7ultimatefancolombia\  \ uganda best balkans tours" \
     --train_batch_size=1 \
     --gradient_accumulation_steps=4 \
-    --report_to wandb 
+    --report_to wandb

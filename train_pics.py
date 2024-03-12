@@ -137,7 +137,8 @@ def log_validation(
         )
 
     image_logs = []
-    inference_ctx = contextlib.nullcontext() if is_final_validation else torch.autocast("cuda")
+    # inference_ctx = contextlib.nullcontext() if is_final_validation else torch.autocast("cuda")
+    inference_ctx = torch.autocast("cuda")
 
     sketch_transforms =  transforms.Compose(
         [
@@ -154,14 +155,17 @@ def log_validation(
         ntc_input = sketch_transforms(validation_sketch).unsqueeze(0)
         with torch.no_grad():
             ntc_output = ntc(ntc_input.to(accelerator.device))
-        validation_sketch_recon = transforms.functional.to_pil_image(ntc_output["x_hat"].squeeze())
+        validation_sketch_recon = ntc_output["x_hat"]
+        
+        condition_image = validation_sketch_recon.repeat(1, 3, 1, 1)
+        condition_image.to(accelerator.device)
         
         images = []
 
         for _ in range(args.num_validation_images):
             with inference_ctx:
                 image = pipeline(
-                    validation_prompt, validation_sketch_recon, num_inference_steps=20, generator=generator
+                    validation_prompt, condition_image, num_inference_steps=20, generator=generator
                 ).images[0]
 
             images.append(image)
@@ -186,9 +190,18 @@ def log_validation(
 
                 formatted_images = []
 
-                formatted_images.append(np.asarray(validation_image))
-                formatted_images.append(np.asarray(validation_sketch))
-                formatted_images.append(np.asarray(validation_sketch_recon))
+                # process images to be loaded to tensorboard
+                validation_image = np.asarray(validation_image)
+                
+                validation_sketch = np.tile(np.asarray(validation_sketch), (3, 1, 1))
+                validation_sketch = np.transpose(validation_sketch, (1, 2, 0))
+                
+                validation_sketch_recon = np.tile(validation_sketch_recon.cpu().squeeze(), (3, 1, 1))
+                validation_sketch_recon = np.transpose(validation_sketch_recon, (1, 2, 0))
+
+                formatted_images.append(validation_image)
+                formatted_images.append(validation_sketch)
+                formatted_images.append(validation_sketch_recon)
 
                 for image in images:
                     formatted_images.append(np.asarray(image))
