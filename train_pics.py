@@ -55,12 +55,14 @@ from diffusers.utils.hub_utils import load_or_create_model_card, populate_model_
 from diffusers.utils.import_utils import is_xformers_available
 from diffusers.utils.torch_utils import is_compiled_module
 
-from models_compressai import MeanScaleHyperpriorCustom
+from models_compressai import MeanScaleHyperpriorCustom, Cheng2020AttentionCustom
 from compressai.optimizers import net_aux_optimizer
 from rate_distortion import RateDistortionLoss
 
 from make_pics_training_data import generate_sketch
 from annotator.util import HWC3
+
+# import lpips
 
 if is_wandb_available():
     import wandb
@@ -810,7 +812,7 @@ def main(args):
             " Please use `huggingface-cli login` to authenticate with the Hub."
         )
     
-    args.output_dir = os.path.join(args.output_dir, f"lmbda_{args.lmbda}")
+    # 
 
     logging_dir = Path(args.output_dir, args.logging_dir)
 
@@ -885,7 +887,8 @@ def main(args):
         controlnet = ControlNetModel.from_unet(unet)
 
     # Load NTC model 
-    ntc = MeanScaleHyperpriorCustom(N=128, M=192, orig_channels=1)
+    # ntc = MeanScaleHyperpriorCustom(N=128, M=192, orig_channels=1)
+    ntc = Cheng2020AttentionCustom(N=192, orig_channels=1)
     ntc_weights = torch.load(args.ntc_model_path)
     ntc.load_state_dict(ntc_weights)
     ntc.update()
@@ -929,11 +932,12 @@ def main(args):
     #     accelerator.register_save_state_pre_hook(save_model_hook)
     #     accelerator.register_load_state_pre_hook(load_model_hook)
 
+    # currently freezing ntc weights and finetuning controlnet
     vae.requires_grad_(False)
     unet.requires_grad_(False)
     text_encoder.requires_grad_(False)
     controlnet.train()
-    ntc.train()
+    ntc.requires_grad_(False)
 
     if args.enable_xformers_memory_efficient_attention:
         if is_xformers_available():
@@ -992,7 +996,7 @@ def main(args):
         optimizer_class = torch.optim.AdamW
 
     # Optimizer creation
-    params_to_optimize = list(controlnet.parameters()) + [param for name, param in ntc.named_parameters() if not name.endswith(".quantiles")]
+    params_to_optimize = list(controlnet.parameters()) # + [param for name, param in ntc.named_parameters() if not name.endswith(".quantiles")]
     optimizer = optimizer_class(
         params_to_optimize,
         lr=args.learning_rate,
@@ -1000,19 +1004,22 @@ def main(args):
         weight_decay=args.adam_weight_decay,
         eps=args.adam_epsilon,
     )
+
     ##################################################################
     # TODO
     # include ntc hyperparameters in argparse
     ntc_metric = "ms-ssim"
     ntc_criterion = RateDistortionLoss(lmbda=args.lmbda, metric=ntc_metric)
 
-    aux_learning_rate = 1e-3
-    aux_conf = {
-        "net": {"type": "Adam", "lr": args.learning_rate},
-        "aux": {"type": "Adam", "lr": aux_learning_rate},
-    }
-    ntc_optimizer = net_aux_optimizer(ntc, aux_conf)
-    aux_optimizer = ntc_optimizer["aux"]
+    # aux_learning_rate = 1e-3
+    # aux_conf = {
+    #     "net": {"type": "Adam", "lr": args.learning_rate},
+    #     "aux": {"type": "Adam", "lr": aux_learning_rate},
+    # }
+    # ntc_optimizer = net_aux_optimizer(ntc, aux_conf)
+    # aux_optimizer = ntc_optimizer["aux"]
+
+    # lpips_fn = lpips.LPIPS(net='vgg')
 
     ##################################################################
 
@@ -1045,8 +1052,12 @@ def main(args):
     # Prepare everything with our `accelerator`.
     # TODO
     # May not need aux_optimizer here
-    controlnet, ntc, optimizer, aux_optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-        controlnet, ntc, optimizer, aux_optimizer, train_dataloader, lr_scheduler
+    # controlnet, ntc, optimizer, aux_optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
+    #     controlnet, ntc, optimizer, aux_optimizer, train_dataloader, lr_scheduler
+    # )
+
+    controlnet, ntc, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
+        controlnet, ntc, optimizer, train_dataloader, lr_scheduler
     )
 
     # For mixed precision training we cast the text_encoder and vae weights to half-precision
@@ -1202,24 +1213,27 @@ def main(args):
                 # define rate loss as bpp at bottleneck in ntc
                 rate_loss = ntc_criterion(ntc_out, controlnet_image)["bpp_loss"]
 
+                # define distortion loss as LPIPS distance between original image and reconstruction
+
                 # define loss as Langrange of perceptual loss and rate loss
-                loss = args.lmbda * perceptual_loss + rate_loss
+                # loss = args.lmbda * perceptual_loss + rate_loss
+                loss = perceptual_loss
 
                 # Get aux loss 
-                aux_loss = ntc.aux_loss()
-                aux_loss.backward()
-                aux_optimizer.step()
+                # aux_loss = ntc.aux_loss()
+                # aux_loss.backward()
+                # aux_optimizer.step()
 
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
-                    params_to_clip = list(controlnet.parameters()) + [param for name, param in ntc.named_parameters() if not name.endswith(".quantiles")]
+                    params_to_clip = list(controlnet.parameters()) # + [param for name, param in ntc.named_parameters() if not name.endswith(".quantiles")]
                     accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
                 
                 optimizer.step()
                 lr_scheduler.step()
                 
                 optimizer.zero_grad(set_to_none=args.set_grads_to_none)
-                aux_optimizer.zero_grad()
+                # aux_optimizer.zero_grad()
             
             # TODO 
             # check grad sync and log code below and modify
